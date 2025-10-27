@@ -1,0 +1,13 @@
+# Ignore all FITS data files
+*.fits
+*.fits.gz
+
+# Ignore XMM-SAS calibration and housekeeping files
+*.SAS
+*.ccf
+*.cif
+*calindex.fits
+*housekeeping.fits
+
+# Ignore personal notes
+*.log
