@@ -1,20 +1,45 @@
-# Ignore all FITS data files
+
+# === Top-Level Data & Product Directories ===
+# Ignore all generated products
+products/
+
+# Ignore all raw data
+data/
+
+
+
+# === FITS Data Files (Raw & Processed) ===
+# Ignore all FITS data, event files, etc.
 *.fits
 *.fits.gz
-
-# Ignore XMM-SAS calibration and housekeeping files
-*.SAS
-*.ccf
-*.cif
+*.FIT
+*.evt
+*.DS
+*.ds
 *calindex.fits
 *housekeeping.fits
 
-# Ignore personal notes
-*.log
 
-# Ignore tars
+# === SAS Setup & Calibration Files ===
+# These are locally generated or part of the CCF
+*.SAS
+*.cif
+*.ccf
+
+
+# === Plots & Logs ===
+# Ignore all logs and plot files
+*.log
+*.ps
+*.pdf
+*.png
+
+
+# === Archives & Compressed Files ===
 *.tar
 *.tar.gz
 
-#Ignore data files
-data/
+
+# === OS System Files ===
+.DS_Store
+Thumbs.db
