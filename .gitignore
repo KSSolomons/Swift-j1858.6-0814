@@ -17,4 +17,4 @@
 *.tar.gz
 
 #Ignore data files
-data/odf
+data/
