@@ -11,3 +11,7 @@
 
 # Ignore personal notes
 *.log
+
+# Ignore tars
+*.tar
+*.tar.gz
