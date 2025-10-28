@@ -15,3 +15,6 @@
 # Ignore tars
 *.tar
 *.tar.gz
+
+#Ignore data files
+data/odf
