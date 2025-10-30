@@ -78,11 +78,11 @@ fi
 echo "Found event file: ${PN_EVT_FILE}"
 
 # --- 2. Define output filenames ---
-# These paths now correctly include the ObsID via PN_DIR
+
 SRC_LC="${PN_DIR}/pn_src_lc.fits"
-SRC_LC_PLOT="${PN_DIR}/pn_src_lc.jpg" # Changed to jpg as per your script
+SRC_LC_PLOT="${PN_DIR}/pn_src_lc.jpg" 
 BKG_LC="${PN_DIR}/pn_bkg_lc.fits"
-BKG_LC_PLOT="${PN_DIR}/pn_bkg_lc.jpg" # Changed to jpg as per your script
+BKG_LC_PLOT="${PN_DIR}/pn_bkg_lc.jpg" 
 GTI_FILE="${PN_DIR}/gti_bkg.fits"
 CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 
@@ -91,13 +91,13 @@ CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 # Using standard Imaging mode background expression as placeholder:
 # For Timing Mode, often use RAWX instead of spatial region, e.g., low RAWX values.
 BKG_EXPR="#XMMEA_EP && (PI in [10000:12000]) && (PATTERN==0)" # Placeholder, refine if needed
-SRC_EXPR="#XMMEA_EP && (PI in [200:15000]) && (PATTERN<=4)" # Standard source expression
+SRC_EXPR="#XMMEA_EP && (PI in [500:10000]) && (PATTERN<=4)" # Standard source expression
 
 # --- 3. Create Source Lightcurve Plots ---
 echo "Creating source lightcurve: ${SRC_LC}"
 evselect table="${PN_EVT_FILE}" \
     withrateset=yes rateset="${SRC_LC}" \
-    maketimecolumn=yes timebinsize=200 makeratecolumn=yes \
+    maketimecolumn=yes timebinsize=50 makeratecolumn=yes \
     expression="${SRC_EXPR}"
     
 # --- 4. Create Background Lightcurve ---
