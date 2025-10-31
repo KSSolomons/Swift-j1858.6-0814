@@ -161,7 +161,7 @@ if [ "${APPLY_FILTER}" == "yes" ]; then
         withfilteredset=yes filteredset="${CLEAN_EVT_FILE}" \
         keepfilteroutput=yes \
         expression="${SCIENCE_EXPR} && gti(${GTI_FILE},TIME)" \
-        updateexposure=yes
+        updateexposure=yes writedss=yes
 
     echo "Filtering complete."
 
@@ -174,7 +174,7 @@ else
         withfilteredset=yes filteredset="${CLEAN_EVT_FILE}" \
         keepfilteroutput=yes \
         expression="${SCIENCE_EXPR}" \
-        updateexposure=yes
+        updateexposure=yes writedss=yes
 
     echo "File creation complete (no flare filter applied)."
 fi
