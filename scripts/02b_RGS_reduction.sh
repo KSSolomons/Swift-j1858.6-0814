@@ -40,6 +40,23 @@ RGS_RATE_THRESHOLD="0.1"
 
 # --- END OF CONFIGURATION ---
 
+# --- Re-establish SAS Setup Variables ---
+# Assumes OBS_DIR_ODF points to data/[OBSID]
+ODF_DIR_CLEAN=$(echo "${OBS_DIR_ODF}" | sed 's:/*$::') # Clean path to data dir
+CCF_FILE="${ODF_DIR_CLEAN}/ccf.cif"
+SUMMARY_FILE_NAME=$(find "${ODF_DIR_CLEAN}" -maxdepth 1 -name "*SUM.SAS" -printf "%f\n" | head -n 1)
+if [ -z "${SUMMARY_FILE_NAME}" ]; then
+    echo "ERROR: Cannot find *SUM.SAS file in ${ODF_DIR_CLEAN}"
+    echo "Please ensure script 01 ran successfully."
+    exit 1
+fi
+SUMMARY_FILE="${ODF_DIR_CLEAN}/${SUMMARY_FILE_NAME}"
+if [ ! -f "${CCF_FILE}" ]; then echo "ERROR: Cannot find CCF file: ${CCF_FILE}"; exit 1; fi
+if [ ! -f "${SUMMARY_FILE}" ]; then echo "ERROR: Cannot find Summary file: ${SUMMARY_FILE}"; exit 1; fi
+export SAS_CCF="${CCF_FILE}"
+export SAS_ODF="${SUMMARY_FILE}"
+echo "SAS_CCF re-established: $(basename "${SAS_CCF}")"
+echo "SAS_ODF re-established: $(basename "${SAS_ODF}")"
 
 # Set strict error checking
 set -e
@@ -62,7 +79,7 @@ echo "Using ObsID: ${OBSID}"
 
 # --- Define Directories ---
 
-export RGS_DIR="products/${OBSID}/rgs"
+export RGS_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/rgs"
 export PLOT_DIR="${RGS_DIR}/plots"
 echo "Looking for input/output files in: ${RGS_DIR}"
 

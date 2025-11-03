@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# SCRIPT: run_reprocessing.sh
+# SCRIPT: 01_setup_and_reprocess.sh
 #
 # DESCRIPTION:
 # This script performs the initial setup (cifbuild, odfingest) and

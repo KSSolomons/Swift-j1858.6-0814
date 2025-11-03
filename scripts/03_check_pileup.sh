@@ -27,7 +27,9 @@
 #
 ################################################################################
 
-# --- USER CONFIGURATION - EDIT THIS SECTION ---
+# --- USER CONFIGURATION - 
+
+
 
 # Set the RAWX filter for your FULL SOURCE
 # Example: "RAWX in [30:45]"
@@ -73,8 +75,8 @@ echo "Using ObsID: ${OBSID}"
 
 # --- Define Directories ---
 
-export PN_DIR="products/${OBSID}/pn"
-export PU_DIR="products/${OBSID}/pn/pile_up"
+export PN_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/pn"
+export PU_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/pn/pile_up"
 echo "Looking for input/output files in: ${PN_DIR}"
 
 # --- 1. Create the output directory ---
@@ -116,6 +118,7 @@ evselect table="${CLEAN_EVT_FILE}" \
     filteredset="${BKG_EVT_TEMP}" \
     keepfilteroutput=yes \
     expression="${BKG_FILTER_EXPR}" 
+    
 # --- 5. Create FULL Source Region epatplot (Always runs) ---
 echo "--- Creating FULL region pile-up plot ---"
 FULL_SRC_FILTER_EXPR="${BASE_FILTER_EXPR} && ${SRC_RAWX_FILTER}"

@@ -106,8 +106,8 @@ fi
 echo "Using ObsID: ${OBSID}"
 
 # --- Define Directories ---
-export PN_DIR="products/${OBSID}/pn"
-export SPEC_DIR="products/${OBSID}/pn/spec" # Output directory for final spectra
+export PN_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/pn"
+export SPEC_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/pn/spec" # Output directory for final spectra
 echo "Looking for input/output files in: ${PN_DIR} and ${SPEC_DIR}"
 
 # --- 1. Create output directory ---

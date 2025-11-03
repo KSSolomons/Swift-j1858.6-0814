@@ -21,9 +21,11 @@
 # Define the time filters (in MET seconds) to apply.
 # Use standard BASH array syntax (spaces between quoted strings).
 TIME_FILTERS=(
-    "(TIME IN [701592874.218876:701596384.218876]) && (TIME IN [701625304.218876:701628654.218876]) && (TIME IN [701632874.218876:701676024.218876])"
+    "(TIME IN [701592874.218876:701596384.218876]) && (TIME IN [701625304.218876:701628654.218876]) && (TIME IN [701632874.218876:701658634.218876])"
     "(TIME IN [701596384.218876:701625304.218876])"
     "(TIME IN [701628654.218876:701632874.218876])"
+    "(TIME IN [701658634.218876:701676024.218876])"
+    
 )
 
 # Define a unique name for EACH filter above. MUST be in the same order.
@@ -31,6 +33,7 @@ OUTPUT_SUFFIXES=(
     "Persistent"
     "Dipping"
     "Eclipse"
+    "Shallow"
 )
 
 # --- END TIME FILTER ---
@@ -81,8 +84,8 @@ if ! [[ "${OBSID}" =~ ^[0-9]{10}$ ]]; then OBSID="unknown_obsid"; fi
 echo "Using ObsID: ${OBSID}"
 
 # --- Define Directories ---
-export PN_DIR="products/${OBSID}/pn"
-export SPEC_DIR="products/${OBSID}/pn/spec" # Output directory for final spectra
+export PN_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/pn"
+export SPEC_DIR="${OBS_DIR_ODF}../../products/${OBSID}/pn/spec" # Output directory for final spectra
 mkdir -p "${SPEC_DIR}"
 CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 
