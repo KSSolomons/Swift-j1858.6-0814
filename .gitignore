@@ -43,3 +43,8 @@ data/
 # === OS System Files ===
 .DS_Store
 Thumbs.db
+
+# ===Config files ===
+
+*.xml
+*.iml
