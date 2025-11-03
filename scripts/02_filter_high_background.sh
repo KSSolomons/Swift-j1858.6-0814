@@ -3,7 +3,7 @@
 # SCRIPT: 02_filter_background.sh
 #
 # DESCRIPTION:
-# Creates high-energy background and source lightcurves for a specific ObsID.
+# Creates A high-energy background lightcurve for a specific ObsID.
 # Based on user-set variables, it then applies a flare filter (or not)
 # to create the final 'pn_clean.evt' file in products/[ObsID]/pn/.
 #
@@ -96,8 +96,8 @@ echo "Found event file: ${PN_EVT_FILE}"
 
 # --- 2. Define output filenames ---
 
-SRC_LC="${PN_DIR}/pn_src_lc.fits"
-SRC_LC_PLOT="${PN_DIR}/pn_src_lc.jpg" 
+#SRC_LC="${PN_DIR}/pn_src_lc.fits"
+#SRC_LC_PLOT="${PN_DIR}/pn_src_lc.jpg" 
 BKG_LC="${PN_DIR}/pn_bkg_lc.fits"
 BKG_LC_PLOT="${PN_DIR}/pn_bkg_lc.jpg" 
 GTI_FILE="${PN_DIR}/gti_bkg.fits"
@@ -111,11 +111,11 @@ BKG_EXPR="#XMMEA_EP && (PI in [10000:12000]) && (PATTERN==0)" # Placeholder, ref
 SRC_EXPR="#XMMEA_EP && (PI in [500:10000]) && (PATTERN<=4)" # Standard source expression
 
 # --- 3. Create Source Lightcurve Plots ---
-echo "Creating source lightcurve: ${SRC_LC}"
-evselect table="${PN_EVT_FILE}" \
-    withrateset=yes rateset="${SRC_LC}" \
-    maketimecolumn=yes timebinsize=50 makeratecolumn=yes \
-    expression="${SRC_EXPR}"
+#echo "Creating source lightcurve: ${SRC_LC}"
+#evselect table="${PN_EVT_FILE}" \
+#    withrateset=yes rateset="${SRC_LC}" \
+#    maketimecolumn=yes timebinsize=50 makeratecolumn=yes \
+#    expression="${SRC_EXPR}"
     
 # --- 4. Create Background Lightcurve ---
 echo "Creating background lightcurve: ${BKG_LC}"
@@ -132,10 +132,10 @@ cd "${PN_DIR}" || { echo "Failed to cd into ${PN_DIR}"; exit 1; }
 echo "Creating diagnostic plots..."
 
 # Source Lightcurve (Time vs. Rate)
-echo "  Generating pn_src_lc.ps..."
+#echo "  Generating pn_src_lc.ps..."
 
-fplot "pn_src_lc.fits[RATE]" xparm="TIME" yparm="RATE" mode='h' device="pn_src_lc.ps/PS" </dev/null
-convert "pn_src_lc.ps[0]" pn_src_lc.jpg
+#fplot "pn_src_lc.fits[RATE]" xparm="TIME" yparm="RATE" mode='h' device="pn_src_lc.ps/PS" </dev/null
+#convert "pn_src_lc.ps[0]" pn_src_lc.jpg
 
 echo "  Created ${SRC_LC_PLOT}"
 
