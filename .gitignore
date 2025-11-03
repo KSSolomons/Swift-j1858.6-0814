@@ -45,7 +45,7 @@ data/
 Thumbs.db
 
 # ===Config files ===
-
+.idea
 *.xml
 *.iml
 .ipynb_checkpoints/
