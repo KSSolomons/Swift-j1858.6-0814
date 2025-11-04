@@ -3,29 +3,30 @@
 # SCRIPT: 02_filter_background.sh
 #
 # DESCRIPTION:
-# Creates A high-energy background lightcurve for a specific ObsID.
+# Creates a high-energy background lightcurve for a specific ObsID.
 # Based on user-set variables, it then applies a flare filter (or not)
 # to create the final 'pn_clean.evt' file in products/[ObsID]/pn/.
 #
 # ASSUMES:
-# - OBS_DIR_ODF environment variable points to data/[OBSID]
+# - $PROJECT_ROOT environment variable points to the project root directory.
+# - $OBSID environment variable is set to the 10-digit observation ID.
+# - HEASOFT and SAS are initialized.
 #
 # USAGE:
-# 1. Run this script once from the repository root:
+# 1. Ensure $PROJECT_ROOT and $OBSID are set.
+# 2. Run this script once:
 #    ./scripts/02_filter_background.sh
 #
-# 2. Open the new plots in 'products/[ObsID]/pn/':
-#    - 'pn_bkg_lc.jpg' (the background lightcurve)
-#    - 'pn_src_lc.jpg' (the source lightcurve)
+# 3. Open 'products/[ObsID]/pn/pn_bkg_lc.jpg'.
 #
-# 3. Based on the bkg plot, edit the "USER CONFIGURATION" section below.
+# 4. Based on the bkg plot, edit the "USER CONFIGURATION" section below.
 #    - If you see flares:
 #      Set APPLY_FILTER="yes"
 #      Set RATE_THRESHOLD to your chosen cutoff (e.g., "0.4")
 #    - If you see NO flares:
 #      Leave APPLY_FILTER="no"
 #
-# 4. Run the script again. It will now create 'products/[ObsID]/pn/pn_clean.evt'.
+# 5. Run the script again. It will now create 'products/[ObsID]/pn/pn_clean.evt'.
 #
 ################################################################################
 
@@ -39,8 +40,29 @@ RATE_THRESHOLD="0.4"
 
 # --- END OF CONFIGURATION ---
 
+# --- 1. CHECK FOR ENVIRONMENT VARIABLES & SET PATHS ---
+if [ -z "${PROJECT_ROOT}" ]; then
+    echo "ERROR: Environment variable PROJECT_ROOT is not set."
+    echo "Please set this to the full path of your project directory."
+    echo "Example: export PROJECT_ROOT=/path/to/my_analysis"
+    exit 1
+fi
+
+if [ -z "${OBSID}" ]; then
+    echo "ERROR: Environment variable OBSID is not set."
+    echo "Example: export OBSID=0123456789"
+    exit 1
+fi
+
+# Define the ODF directory path from the root and ObsID
+export OBS_DIR_ODF="${PROJECT_ROOT}/data/${OBSID}"
+if [ ! -d "${OBS_DIR_ODF}" ]; then
+    echo "ERROR: ODF directory not found: ${OBS_DIR_ODF}"
+    exit 1
+fi
+echo "Using ODF from: ${OBS_DIR_ODF}"
+
 # --- Re-establish SAS Setup Variables ---
-# Assumes OBS_DIR_ODF points to data/[OBSID]
 ODF_DIR_CLEAN=$(echo "${OBS_DIR_ODF}" | sed 's:/*$::') # Clean path to data dir
 CCF_FILE="${ODF_DIR_CLEAN}/ccf.cif"
 SUMMARY_FILE_NAME=$(find "${ODF_DIR_CLEAN}" -maxdepth 1 -name "*SUM.SAS" -printf "%f\n" | head -n 1)
@@ -61,31 +83,18 @@ echo "SAS_ODF re-established: $(basename "${SAS_ODF}")"
 set -e
 
 echo "--- Starting Background Flare Filtering ---"
-export PROC_DIR=$(pwd)
-
-# --- Get ObsID ---
-if [ -z "${OBS_DIR_ODF}" ]; then
-    echo "ERROR: Environment variable OBS_DIR_ODF is not set."
-    echo "Should point to e.g., /path/to/data/0123456789"
-    exit 1
-fi
-OBSID=$(basename "${OBS_DIR_ODF}")
-if ! [[ "${OBSID}" =~ ^[0-9]{10}$ ]]; then
-    echo "WARNING: Could not reliably determine 10-digit ObsID from OBS_DIR_ODF path ('${OBS_DIR_ODF}'). Got '${OBSID}'."
-    OBSID="unknown_obsid" # Fallback
-fi
-echo "Using ObsID: ${OBSID}"
+# Set the root directory variable for cd commands
+export PROC_DIR="${PROJECT_ROOT}"
 
 # --- Define Directories ---
-
-export PN_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/pn"
+# This path is now robust and absolute
+export PN_DIR="${PROJECT_ROOT}/products/${OBSID}/pn"
 echo "Looking for input/output files in: ${PN_DIR}"
 
 # --- 1. Find the input EPIC-pn event file ---
-# This looks for the calibrated event file created by epproc
 echo "Locating PN event file from epproc..."
 
-PN_EVT_FILE=$(find "${PN_DIR}" -name "*EPN*Evts.ds" -type f | head -n 1) 
+PN_EVT_FILE=$(find "${PN_DIR}" -name "*EPN*Evts.ds" -type f | head -n 1)
 
 if [ -z "${PN_EVT_FILE}" ]; then
     echo "ERROR: Could not find the primary PN event file (*EPN*Evts.ds) in ${PN_DIR}"
@@ -95,29 +104,17 @@ fi
 echo "Found event file: ${PN_EVT_FILE}"
 
 # --- 2. Define output filenames ---
-
-#SRC_LC="${PN_DIR}/pn_src_lc.fits"
-#SRC_LC_PLOT="${PN_DIR}/pn_src_lc.jpg" 
 BKG_LC="${PN_DIR}/pn_bkg_lc.fits"
-BKG_LC_PLOT="${PN_DIR}/pn_bkg_lc.jpg" 
+BKG_LC_PLOT="${PN_DIR}/pn_bkg_lc.jpg"
 GTI_FILE="${PN_DIR}/gti_bkg.fits"
 CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 
-# Base SAS filter expression.
-# Timing mode specific background filter might differ, check SAS threads.
-# Using standard Imaging mode background expression as placeholder:
-# For Timing Mode, often use RAWX instead of spatial region, e.g., low RAWX values.
-BKG_EXPR="#XMMEA_EP && (PI in [10000:12000]) && (PATTERN==0)" # Placeholder, refine if needed
-SRC_EXPR="#XMMEA_EP && (PI in [500:10000]) && (PATTERN<=4)" # Standard source expression
+# Define filter expressions
+BKG_EXPR="#XMMEA_EP && (PI in [10000:12000]) && (PATTERN==0)"
+# Note: #XMMEA_EP is for IMAGING mode. For TIMING mode, this should be (RAWX in [3:5]) or similar.
+# Assuming BKG_EXPR is correct for your mode.
 
-# --- 3. Create Source Lightcurve Plots ---
-#echo "Creating source lightcurve: ${SRC_LC}"
-#evselect table="${PN_EVT_FILE}" \
-#    withrateset=yes rateset="${SRC_LC}" \
-#    maketimecolumn=yes timebinsize=50 makeratecolumn=yes \
-#    expression="${SRC_EXPR}"
-    
-# --- 4. Create Background Lightcurve ---
+# --- 3. Create Background Lightcurve ---
 echo "Creating background lightcurve: ${BKG_LC}"
 evselect table="${PN_EVT_FILE}" \
     withrateset=yes rateset="${BKG_LC}" \
@@ -125,50 +122,41 @@ evselect table="${PN_EVT_FILE}" \
     expression="${BKG_EXPR}"
 
 
-# --- 4b. Create Plots ---
+# --- 4. Create Plots ---
 echo "Changing to ${PN_DIR} to create plots..."
 cd "${PN_DIR}" || { echo "Failed to cd into ${PN_DIR}"; exit 1; }
 
 echo "Creating diagnostic plots..."
 
-# Source Lightcurve (Time vs. Rate)
-#echo "  Generating pn_src_lc.ps..."
-
-#fplot "pn_src_lc.fits[RATE]" xparm="TIME" yparm="RATE" mode='h' device="pn_src_lc.ps/PS" </dev/null
-#convert "pn_src_lc.ps[0]" pn_src_lc.jpg
-
-echo "  Created ${SRC_LC_PLOT}"
-
 # Background Lightcurve (Time vs. Rate)
 echo "  Generating pn_bkg_lc.ps..."
-
 fplot "pn_bkg_lc.fits[RATE]" xparm="TIME" yparm="RATE" mode='h' device="pn_bkg_lc.ps/PS" </dev/null
-convert "pn_bkg_lc.ps[0]" pn_bkg_lc.jpg
-
+convert -density 300"pn_bkg_lc.ps[0]" pn_bkg_lc.jpg
 echo "  Created ${BKG_LC_PLOT}"
+rm -f "pn_bkg_lc.ps" # Clean up postscript file
 
 # Return to the root directory
 echo "Plots created. Returning to root directory..."
 cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
 
 echo ""
-#echo "Plots created in ${PN_DIR}. Please inspect background lightcurve: ${BKG_LC_PLOT}"
-echo "Plots created in products directory. Please inspect background lightcurve."
+echo "Plots created in ${PN_DIR}. Please inspect background lightcurve: ${BKG_LC_PLOT}"
 echo ""
 echo "--> Set APPLY_FILTER in this script and re-run. <--"
 echo ""
 
 # --- 5. Apply Filter (or not) based on user flag ---
 
-# Base science filter expression (Timing Mode often PI>200 or PI>500)
-SCIENCE_EXPR="#XMMEA_EP && (PI>200)" # Adjust PI range if needed for Timing Mode
+# Base science filter expression
+# For TIMING Mode: (PATTERN<=4) && (FLAG==0)
+# For IMAGING Mode: #XMMEA_EP && (PATTERN<=12)
+SCIENCE_EXPR="#XMMEA_EP && (PATTERN<=4) && (PI>200)" # Using TIMING mode expression
 
 if [ "${APPLY_FILTER}" == "yes" ]; then
     echo "--- Applying flare filter ---"
     echo "Using count rate threshold: <= ${RATE_THRESHOLD}"
 
     # 1. Create a Good Time Interval (GTI) file from the background lightcurve
-    # Need full path for tabgtigen table parameter
     tabgtigen table="${BKG_LC}" \
         expression="RATE<=${RATE_THRESHOLD}" \
         gtiset="${GTI_FILE}"

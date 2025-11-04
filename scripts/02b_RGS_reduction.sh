@@ -5,25 +5,16 @@
 # DESCRIPTION:
 # Performs post-rgsproc RGS data reduction steps for a specific ObsID:
 # 1. (Optional) Creates diagnostic plots (spatial, PI) with region overlays.
-# 2. Creates background lightcurves (CCD9, background region) and plots for flare inspection.
-# 3. (On second run, IF filtering is requested) Applies GTI filtering and re-runs rgsproc
-#    from 'filter' through 'fluxing' stages to produce final filtered spectra/responses.
-#    Output files are placed in products/[ObsID]/rgs/
+# 2. Creates individual RGS1/RGS2 raw source lightcurves.
+# 3. Creates a final, combined/corrected source lightcurve using 'rgslccorr'.
+# 4. Creates background lightcurves (CCD9, background region) and plots for flare inspection.
+# 5. (On second run, IF filtering is requested) Applies GTI filtering by re-running
+#    'rgsproc entrystage=3:filter' with the new GTI files.
 #
 # ASSUMES:
-# - OBS_DIR_ODF environment variable points to data/[OBSID]
-# - Script 01_setup_and_reprocess.sh has been run successfully for the target ObsID.
-# - RGS event lists (*EVENLI*.FIT) and source lists (*SRCLI*.FIT) exist
-#   in the products/[ObsID]/rgs/ directory.
-#
-# USAGE:
-# 1. (Optional) Set CREATE_DIAGNOSTIC_PLOTS="yes".
-# 2. Run the script once: ./scripts/05_rgs_reduction.sh
-# 3. Inspect the background lightcurve plots in products/[ObsID]/rgs/plots/.
-# 4. Edit this script:
-#    - If flares are present: Set APPLY_RGS_FILTER="yes" and adjust RGS_RATE_THRESHOLD.
-#    - If no flares: Leave APPLY_RGS_FILTER="no".
-# 5. Run the script again. If filtering was selected, it will re-run rgsproc.
+# - $PROJECT_ROOT, $OBSID environment variables are set.
+# - Script 01_setup_and_reprocess.sh has been run successfully.
+# - RGS *EVENLI*.FIT, *SRCLI*.FIT, and *MERGED*.FIT files exist.
 #
 ################################################################################
 
@@ -32,22 +23,45 @@
 # Set to "yes" to create the initial spatial/PI diagnostic plots
 CREATE_DIAGNOSTIC_PLOTS="yes"
 
-# Set to "yes" to apply flare filtering, "no" to skip it.
-APPLY_RGS_FILTER="no"
+# --- RGS Source Lightcurve (rgslccorr) ---
+LC_BIN_SIZE="100"
+RGS_SOURCE_ID="1"
 
-# If APPLY_RGS_FILTER="yes", set your count rate cutoff here (e.g., "0.1").
-RGS_RATE_THRESHOLD="0.1"
+# --- RGS Flare Filtering ---
+FILTER_RGS1="no"
+FILTER_RGS2="yes"
+RGS_RATE_THRESHOLD="0.12"
 
 # --- END OF CONFIGURATION ---
 
+# --- 1. CHECK FOR ENVIRONMENT VARIABLES & SET PATHS ---
+if [ -z "${PROJECT_ROOT}" ]; then
+    echo "ERROR: Environment variable PROJECT_ROOT is not set."
+    exit 1
+fi
+if [ -z "${OBSID}" ]; then
+    echo "ERROR: Environment variable OBSID is not set."
+    exit 1
+fi
+
+# Define paths from root
+export OBS_DIR_ODF="${PROJECT_ROOT}/data/${OBSID}"
+export RGS_DIR="${PROJECT_ROOT}/products/${OBSID}/rgs"
+export PLOT_DIR="${RGS_DIR}/plots"
+export PROC_DIR="${PROJECT_ROOT}" # Use this, not pwd
+
+if [ ! -d "${OBS_DIR_ODF}" ]; then
+    echo "ERROR: ODF directory not found: ${OBS_DIR_ODF}"
+    exit 1
+fi
+echo "Using ODF from: ${OBS_DIR_ODF}"
+
 # --- Re-establish SAS Setup Variables ---
-# Assumes OBS_DIR_ODF points to data/[OBSID]
-ODF_DIR_CLEAN=$(echo "${OBS_DIR_ODF}" | sed 's:/*$::') # Clean path to data dir
+ODF_DIR_CLEAN=$(echo "${OBS_DIR_ODF}" | sed 's:/*$::')
 CCF_FILE="${ODF_DIR_CLEAN}/ccf.cif"
 SUMMARY_FILE_NAME=$(find "${ODF_DIR_CLEAN}" -maxdepth 1 -name "*SUM.SAS" -printf "%f\n" | head -n 1)
 if [ -z "${SUMMARY_FILE_NAME}" ]; then
     echo "ERROR: Cannot find *SUM.SAS file in ${ODF_DIR_CLEAN}"
-    echo "Please ensure script 01 ran successfully."
     exit 1
 fi
 SUMMARY_FILE="${ODF_DIR_CLEAN}/${SUMMARY_FILE_NAME}"
@@ -62,29 +76,11 @@ echo "SAS_ODF re-established: $(basename "${SAS_ODF}")"
 set -e
 
 echo "--- Starting RGS Post-Processing ---"
-export PROC_DIR=$(pwd)
-
-# --- Get ObsID ---
-if [ -z "${OBS_DIR_ODF}" ]; then
-    echo "ERROR: Environment variable OBS_DIR_ODF is not set."
-    echo "Should point to e.g., /path/to/data/0123456789"
-    exit 1
-fi
-OBSID=$(basename "${OBS_DIR_ODF}")
-if ! [[ "${OBSID}" =~ ^[0-9]{10}$ ]]; then
-    echo "WARNING: Could not reliably determine 10-digit ObsID from OBS_DIR_ODF path ('${OBS_DIR_ODF}'). Got '${OBSID}'."
-    OBSID="unknown_obsid" # Fallback
-fi
 echo "Using ObsID: ${OBSID}"
-
-# --- Define Directories ---
-
-export RGS_DIR="${OBS_DIR_ODF}/../../products/${OBSID}/rgs"
-export PLOT_DIR="${RGS_DIR}/plots"
 echo "Looking for input/output files in: ${RGS_DIR}"
 
-
 # --- FUNCTION DEFINITIONS ---
+# (Redirect status 'echo' to stderr >&2)
 
 create_rgs_diag_plots() {
     local rgs_num=$1
@@ -92,7 +88,7 @@ create_rgs_diag_plots() {
     local src_file_base=$3 # Just the filename
 
     if [ -z "${evt_file_base}" ] || [ -z "${src_file_base}" ]; then
-        echo "Skipping RGS${rgs_num} diagnostic plots (missing input files)."
+        echo "Skipping RGS${rgs_num} diagnostic plots (missing input files)." >&2
         return
     fi
 
@@ -101,28 +97,29 @@ create_rgs_diag_plots() {
     local plot_ps="plots/rgs${rgs_num}_diag_regions.ps" # Relative path within RGS_DIR
     local plot_png="plots/rgs${rgs_num}_diag_regions.png" # Relative path within RGS_DIR
 
-    echo "Creating RGS${rgs_num} spatial image..."
+    echo "Creating RGS${rgs_num} spatial image..." >&2
     evselect table="${evt_file_base}:EVENTS" \
         imageset="${spatial_img}" withimageset=yes \
-        xcolumn='M_LAMBDA' ycolumn='XDSP_CORR'
+        xcolumn='M_LAMBDA' ycolumn='XDSP_CORR' > /dev/null
 
-    echo "Creating RGS${rgs_num} PI image..."
+    echo "Creating RGS${rgs_num} PI image..." >&2
     evselect table="${evt_file_base}:EVENTS" \
         imageset="${pi_img}" withimageset=yes \
         xcolumn='M_LAMBDA' ycolumn='PI' \
         yimagemin=0 yimagemax=3000 \
-        expression="REGION(${src_file_base}:RGS${rgs_num}_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)"
+        expression="REGION(${src_file_base}:RGS${rgs_num}_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)" > /dev/null
 
-    echo "Generating RGS${rgs_num} region overlay plot..."
+    echo "Generating RGS${rgs_num} region overlay plot..." >&2
     rm -f "${plot_ps}" # Remove old plot if exists
     rgsimplot endispset="${pi_img}" spatialset="${spatial_img}" \
         srcidlist='1' srclistset="${src_file_base}" \
         plotfile="${plot_ps}" \
         device="/CPS" </dev/null
 
-    convert "${plot_ps}[0]" "${plot_png}"
+    convert -density 300 "${plot_ps}[0]" "${plot_png}"
+    rm -f "${plot_ps}" # Cleanup
     
-    echo " -> ${plot_png}"
+    echo " -> ${plot_png}" >&2
 }
 
 create_rgs_bkg_lc() {
@@ -131,30 +128,30 @@ create_rgs_bkg_lc() {
     local src_file_base=$3 # Just the filename for the REGION expression
     local lc_fits="rgs${rgs_num}_bkg_lc.fits"
     local lc_ps="plots/rgs${rgs_num}_bkg_lc.ps"     # Relative path within RGS_DIR
-    local lc_png="plots/rgs${rgs_num}_bkg_lc.png"   # Relative path within RGS_DIR
+    local lc_png="plots/rgs${rgs_num}_bkg_lc.png"    # Relative path within RGS_DIR
 
     if [ -z "${evt_file_base}" ] || [ -z "${src_file_base}" ]; then
-        echo "Skipping RGS${rgs_num} background lightcurve (missing event or source file)."
+        echo "Skipping RGS${rgs_num} background lightcurve (missing event or source file)." >&2
         return
     fi
 
-    # Correct expression including background region filter
     local bkg_expr="(CCDNR==9)&&(REGION(${src_file_base}:RGS${rgs_num}_BACKGROUND,M_LAMBDA,XDSP_CORR))"
 
-    echo "Creating RGS${rgs_num} background lightcurve (${lc_fits})..."
+    echo "Creating RGS${rgs_num} background lightcurve (${lc_fits})..." >&2
     evselect table="${evt_file_base}" \
         withrateset=yes rateset="${lc_fits}" \
         maketimecolumn=yes timebinsize=100 makeratecolumn=yes \
-        expression="${bkg_expr}"
+        expression="${bkg_expr}" > /dev/null
 
-    echo "Generating RGS${rgs_num} background lightcurve plot..."
-    rm -f "${lc_ps}" # Remove old plot if exists
+    echo "Generating RGS${rgs_num} background lightcurve plot..." >&2
+    
     fplot "${lc_fits}[RATE]" xparm="TIME" yparm="RATE" \
         device="${lc_ps}/CPS" mode="h" </dev/null
 
-    convert "${lc_ps}[0]" "${lc_png}"
+    convert -density 300 "${lc_ps}[0]" "${lc_png}"
     
-    echo " -> ${lc_png}"
+    
+    echo " -> ${lc_png}" >&2
 }
 
 generate_gti() {
@@ -163,48 +160,49 @@ generate_gti() {
     local gti_fits="gti_rgs${rgs_num}.fits" # Created within RGS_DIR
 
     if [ ! -f "${lc_fits}" ]; then
-        echo "Skipping GTI generation for RGS${rgs_num} (missing lightcurve file)."
+        echo "Skipping GTI generation for RGS${rgs_num} (missing lightcurve file)." >&2
         return "" # Return empty string
     fi
 
-    echo "Generating GTI for RGS${rgs_num}: ${gti_fits}"
-    tabgtigen table="${lc_fits}" expression="RATE<=${RGS_RATE_THRESHOLD}" gtiset="${gti_fits}"
+    echo "Generating GTI for RGS${rgs_num}: ${gti_fits}" >&2
+    
+    # Redirect stdout of tabgtigen to /dev/null so it doesn't get captured
+    tabgtigen table="${lc_fits}" expression="RATE<=${RGS_RATE_THRESHOLD}" gtiset="${gti_fits}" > /dev/null
 
-    echo "${gti_fits}" # Return the filename
+    echo "${gti_fits}" # This is the ONLY output to stdout
 }
 
+# --- EDITED FUNCTION: Use rgsproc entrystage=3 ---
 run_rgsproc_filter() {
-    local rgs_num=$1
-    local gti_file=$2 # Can be empty if no filter
-    local log_file="rgsproc_filter_rgs${rgs_num}.log" # Created within RGS_DIR
-
-    # Need to check if the instrument exists based on initial file finding
-    local evt_exists_flag=""
-    # Check against the global variables RGS1_EVT_FILE/RGS2_EVT_FILE
-    if [ "${rgs_num}" == "1" ] && [ ! -z "${RGS1_EVT_FILE}" ]; then evt_exists_flag="yes"; fi
-    if [ "${rgs_num}" == "2" ] && [ ! -z "${RGS2_EVT_FILE}" ]; then evt_exists_flag="yes"; fi
-
-    if [ -z "${evt_exists_flag}" ]; then
-      echo "Skipping rgsproc run for RGS${rgs_num} (no event file found earlier)."
-      return
+    local gti1=$1
+    local gti2=$2
+    local log_file="rgsproc_filter.log" # Created within RGS_DIR
+    
+    local gti_list=""
+    if [ -n "${gti1}" ]; then
+        gti_list="${gti1}"
+    fi
+    if [ -n "${gti2}" ]; then
+        if [ -n "${gti_list}" ]; then
+            gti_list="${gti_list},${gti2}" # Comma-separate if both exist
+        else
+            gti_list="${gti2}"
+        fi
     fi
 
-    echo "Running rgsproc for RGS${rgs_num}..."
-    local other_rgs=$((3-rgs_num)) # Determine the *other* RGS number (1 or 2)
-
-    if [ -z "${gti_file}" ]; then
-        # This case should ideally not happen if APPLY_RGS_FILTER is 'yes', but handle it
-        echo " (Warning: Filtering requested but no GTI file provided)"
-        rgsproc entrystage=3:filter finalstage=5:fluxing orders='1 2' \
-                excludeexp='R?S000' RGS${rgs_num}=yes RGS${other_rgs}=no >& "${log_file}"
-    else
-        echo " (Using GTI file: ${gti_file})"
-        # Run with GTI
-        rgsproc entrystage=3:filter finalstage=5:fluxing orders='1 2' \
-                auxgtitables="${gti_file}" excludeexp='R?S000' \
-                RGS${rgs_num}=yes RGS${other_rgs}=no >& "${log_file}"
+    if [ -z "${gti_list}" ]; then
+         echo "WARNING: Filtering requested but no valid GTI files provided. Skipping rgsproc." >&2
+         return
     fi
-    echo " -> Log file: ${log_file}"
+    
+    echo "Running rgsproc entrystage=3:filter with GTI list: ${gti_list}" >&2
+    
+    # This is the command from the SAS guide: re-run from filter stage
+    # rgsproc will automatically find the *merged*.FIT files it needs
+    rgsproc entrystage=3:filter finalstage=5:fluxing orders='1 2' \
+            auxgtitables="${gti_list}" > "${log_file}" 2>&1
+
+    echo " -> Log file: ${log_file}" >&2
 }
 
 # --- END OF FUNCTION DEFINITIONS ---
@@ -220,6 +218,9 @@ RGS1_EVT_FILE=$(find "${RGS_DIR}" -maxdepth 1 -name "*R1S*EVENLI*.FIT" -type f |
 RGS2_EVT_FILE=$(find "${RGS_DIR}" -maxdepth 1 -name "*R2S*EVENLI*.FIT" -type f | head -n 1)
 RGS1_SRC_FILE=$(find "${RGS_DIR}" -maxdepth 1 -name "*R1S*SRCLI*.FIT" -type f | head -n 1)
 RGS2_SRC_FILE=$(find "${RGS_DIR}" -maxdepth 1 -name "*R2S*SRCLI*.FIT" -type f | head -n 1)
+RGS1_MERGED_FILE=$(find "${RGS_DIR}" -maxdepth 1 -name "*R1S*merged*.FIT" -type f | head -n 1)
+RGS2_MERGED_FILE=$(find "${RGS_DIR}" -maxdepth 1 -name "*R2S*merged*.FIT" -type f | head -n 1)
+
 
 # Check if essential files exist
 if [ -z "${RGS1_EVT_FILE}${RGS2_EVT_FILE}" ]; then
@@ -230,72 +231,170 @@ if [ -z "${RGS1_SRC_FILE}${RGS2_SRC_FILE}" ]; then
     echo "ERROR: No RGS source lists (*SRCLI*.FIT) found in ${RGS_DIR}. Did script 01 run correctly for ObsID ${OBSID}?"
     exit 1
 fi
+# Check for merged files, which are CRITICAL for filtering
+if [ -z "${RGS1_MERGED_FILE}${RGS2_MERGED_FILE}" ]; then
+    echo "ERROR: No RGS merged lists (*MERGED*.FIT) found in ${RGS_DIR}. Did script 01 run correctly for ObsID ${OBSID}?"
+    exit 1
+fi
+
 
 echo "Found Files:"
 [ ! -z "${RGS1_EVT_FILE}" ] && echo " RGS1 Event: $(basename "${RGS1_EVT_FILE}")"
 [ ! -z "${RGS2_EVT_FILE}" ] && echo " RGS2 Event: $(basename "${RGS2_EVT_FILE}")"
 [ ! -z "${RGS1_SRC_FILE}" ] && echo " RGS1 Source: $(basename "${RGS1_SRC_FILE}")"
 [ ! -z "${RGS2_SRC_FILE}" ] && echo " RGS2 Source: $(basename "${RGS2_SRC_FILE}")"
+[ ! -z "${RGS1_MERGED_FILE}" ] && echo " RGS1 Merged: $(basename "${RGS1_MERGED_FILE}")"
+[ ! -z "${RGS2_MERGED_FILE}" ] && echo " RGS2 Merged: $(basename "${RGS2_MERGED_FILE}")"
 
 
 # --- 3. Create Diagnostic Plots (Optional) ---
 if [ "${CREATE_DIAGNOSTIC_PLOTS}" == "yes" ]; then
     echo "--- Creating Diagnostic Plots ---"
     cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
-    # Call the function
+    
     create_rgs_diag_plots 1 "$(basename "${RGS1_EVT_FILE}")" "$(basename "${RGS1_SRC_FILE}")"
     create_rgs_diag_plots 2 "$(basename "${RGS2_EVT_FILE}")" "$(basename "${RGS2_SRC_FILE}")"
+    
     cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
     echo "Diagnostic plots created (if applicable) in ${PLOT_DIR}"
 fi
 
-# --- 4. Create Background Lightcurves and Plots ---
+# --- 4. Create Source Lightcurves (COMBINED AND INDIVIDUAL) ---
+echo "--- Creating Source Lightcurves ---"
+EV_LIST=""
+SRC_LIST=""
+[ -n "${RGS1_EVT_FILE}" ] && EV_LIST="${EV_LIST} ${RGS1_EVT_FILE}"
+[ -n "${RGS2_EVT_FILE}" ] && EV_LIST="${EV_LIST} ${RGS2_EVT_FILE}"
+[ -n "${RGS1_SRC_FILE}" ] && SRC_LIST="${SRC_LIST} ${RGS1_SRC_FILE}"
+[ -n "${RGS2_SRC_FILE}" ] && SRC_LIST="${SRC_LIST} ${RGS2_SRC_FILE}"
+EV_LIST=$(echo ${EV_LIST}) # Trim leading space
+SRC_LIST=$(echo ${SRC_LIST}) # Trim leading space
+
+# Define all filenames
+LC_OUT_FILE="rgs_source_lc_corrected.fits"
+LC_PLOT_PS="plots/rgs_source_lc_corrected.ps"
+LC_PLOT_PNG="plots/rgs_source_lc_corrected.png"
+
+LC1_RAW_FILE="rgs1_source_lc_raw.fits"
+LC1_PLOT_PS="plots/rgs1_source_lc_raw.ps"
+LC1_PLOT_PNG="plots/rgs1_source_lc_raw.png"
+LC2_RAW_FILE="rgs2_source_lc_raw.fits"
+LC2_PLOT_PS="plots/rgs2_source_lc_raw.ps"
+LC2_PLOT_PNG="plots/rgs2_source_lc_raw.png"
+
+cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
+
+# --- 4a. Individual RGS1 Raw Lightcurve ---
+if [ -n "${RGS1_EVT_FILE}" ]; then
+    echo "Creating RGS1 raw source lightcurve..." >&2
+    RGS1_EVT_BASE=$(basename "${RGS1_EVT_FILE}")
+    RGS1_SRC_BASE=$(basename "${RGS1_SRC_FILE}")
+    SRC_EXPR_1="REGION(${RGS1_SRC_BASE}:RGS1_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)"
+    
+    evselect table="${RGS1_EVT_BASE}" \
+        withrateset=yes rateset="${LC1_RAW_FILE}" \
+        maketimecolumn=yes timebinsize=${LC_BIN_SIZE} makeratecolumn=yes \
+        expression="${SRC_EXPR_1}" > /dev/null
+        
+    echo "Plotting RGS1 raw source lightcurve..." >&2
+    fplot "${LC1_RAW_FILE}[RATE]" xparm="TIME" yparm="RATE" \
+        device="${LC1_PLOT_PS}/CPS" mode="h" </dev/null
+    convert -density 300 "${LC1_PLOT_PS}[0]" "${LC1_PLOT_PNG}"
+    rm -f "${LC1_PLOT_PS}" # Cleanup
+fi
+
+# --- 4b. Individual RGS2 Raw Lightcurve ---
+if [ -n "${RGS2_EVT_FILE}" ]; then
+    echo "Creating RGS2 raw source lightcurve..." >&2
+    RGS2_EVT_BASE=$(basename "${RGS2_EVT_FILE}")
+    RGS2_SRC_BASE=$(basename "${RGS2_SRC_FILE}")
+    SRC_EXPR_2="REGION(${RGS2_SRC_BASE}:RGS2_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)"
+    
+    evselect table="${RGS2_EVT_BASE}" \
+        withrateset=yes rateset="${LC2_RAW_FILE}" \
+        maketimecolumn=yes timebinsize=${LC_BIN_SIZE} makeratecolumn=yes \
+        expression="${SRC_EXPR_2}" > /dev/null
+        
+    echo "Plotting RGS2 raw source lightcurve..." >&2
+    fplot "${LC2_RAW_FILE}[RATE]" xparm="TIME" yparm="RATE" \
+        device="${LC2_PLOT_PS}/CPS" mode="h" </dev/null
+    convert -density 300 "${LC2_PLOT_PS}[0]" "${LC2_PLOT_PNG}"
+    rm -f "${LC2_PLOT_PS}" # Cleanup
+fi
+
+# --- 4c. Combined Corrected Lightcurve (rgslccorr) ---
+echo "Running rgslccorr for combined corrected lightcurve..." >&2
+rgslccorr evlist="${EV_LIST}" \
+    srclist="${SRC_LIST}" \
+    timebinsize=${LC_BIN_SIZE} \
+    orders='1 2' \
+    sourceid=${RGS_SOURCE_ID} \
+    outputsrcfilename="${LC_OUT_FILE}"
+
+echo "Plotting combined corrected RGS lightcurve..." >&2
+fplot "${LC_OUT_FILE}[RATE]" xparm="TIME" yparm="RATE" \
+    device="${LC_PLOT_PS}/CPS" mode="h" </dev/null
+convert -density 300 "${LC_PLOT_PS}[0]" "${LC_PLOT_PNG}"
+rm -f "${LC_PLOT_PS}" # Cleanup
+
+
+# --- End of lightcurve section ---
+cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
+echo " -> All source lightcurves created in ${RGS_DIR} and ${PLOT_DIR}"
+
+
+# --- 5. Create Background Lightcurves and Plots (for Filtering) ---
 echo "--- Creating Background Lightcurves (CCD9 & Background Region) ---"
 cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
-# Call the function
+
 create_rgs_bkg_lc 1 "$(basename "${RGS1_EVT_FILE}")" "$(basename "${RGS1_SRC_FILE}")"
 create_rgs_bkg_lc 2 "$(basename "${RGS2_EVT_FILE}")" "$(basename "${RGS2_SRC_FILE}")"
+
 cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
 
 echo ""
 echo "Background lightcurve plots created in ${PLOT_DIR}"
-echo "--> Inspect plots, edit APPLY_RGS_FILTER/RGS_RATE_THRESHOLD in this script, and re-run. <--"
+echo "--> Inspect plots, edit FILTER_RGS1/FILTER_RGS2 in this script, and re-run. <--"
 echo ""
 
-
-# --- 5. Apply Filter and Re-run rgsproc (Conditional) ---
-if [ "${APPLY_RGS_FILTER}" == "yes" ]; then
+# --- 6. Apply Filter and Re-run rgsproc (Conditional) ---
+if [ "${FILTER_RGS1}" == "yes" ] || [ "${FILTER_RGS2}" == "yes" ]; then
     echo "--- Applying Flare Filter & Re-running rgsproc ---"
     echo "Using count rate threshold: <= ${RGS_RATE_THRESHOLD}"
 
+    cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
+    
     GTI1_FILE=""
     GTI2_FILE=""
 
-    cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
-
-    # Call the function
-    GTI1_FILE=$(generate_gti 1)
-    GTI2_FILE=$(generate_gti 2)
-
-    if [ -z "${GTI1_FILE}" ] && [ -z "${GTI2_FILE}" ]; then
-      echo "WARNING: Filtering requested, but no valid GTI files could be generated. Skipping rgsproc."
-    else
-      # Call the function
-      run_rgsproc_filter 1 "${GTI1_FILE}"
-      run_rgsproc_filter 2 "${GTI2_FILE}"
+    if [ "${FILTER_RGS1}" == "yes" ]; then
+        GTI1_FILE=$(generate_gti 1)
     fi
+    
+    if [ "${FILTER_RGS2}" == "yes" ]; then
+        GTI2_FILE=$(generate_gti 2)
+    fi
+    
+    # Call the filter function
+    run_rgsproc_filter "${GTI1_FILE}" "${GTI2_FILE}"
 
     cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
 
 else
-    echo "--- Skipping Flare Filter (APPLY_RGS_FILTER=no). No rgsproc re-run needed. ---"
+    echo "--- Skipping Flare Filter (FILTER_RGS1/2=no). No rgsproc re-run needed. ---"
 fi
 
 
-# --- 6. Completion ---
+# --- 7. Completion ---
 echo "--------------------------------------------------"
 echo "RGS processing script finished for ObsID ${OBSID}."
-if [ "${APPLY_RGS_FILTER}" == "yes" ]; then
+echo ""
+echo "Plots created in: ${PLOT_DIR}"
+[ -f "${PLOT_DIR}/${LC1_PLOT_PNG}" ] && echo "  - ${LC1_PLOT_PNG}"
+[ -f "${PLOT_DIR}/${LC2_PLOT_PNG}" ] && echo "  - ${LC2_PLOT_PNG}"
+[ -f "${PLOT_DIR}/${LC_PLOT_PNG}" ] && echo "  - ${LC_PLOT_PNG}"
+echo ""
+if [ "${FILTER_RGS1}" == "yes" ] || [ "${FILTER_RGS2}" == "yes" ]; then
     echo "Check log files in ${RGS_DIR} for details of the rgsproc re-run."
     echo "Final filtered spectra and response files are located in ${RGS_DIR}"
 else

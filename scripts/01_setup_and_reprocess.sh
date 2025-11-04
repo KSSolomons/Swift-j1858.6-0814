@@ -11,19 +11,26 @@
 # It is assumed that HEASOFT and SAS has been initialized
 #
 # USAGE:
-# 1. Set the $OBS_DIR_ODF and $SAS_CCFPATH environment variables.
-#    (OBS_DIR_ODF should point to data/[OBSID])
-# 2. Run this script from root
+# 1. Set the $PROJECT_ROOT, $OBSID, and $SAS_CCFPATH environment variables.
+#    (PROJECT_ROOT should be the absolute path to your repo root)
+#    (OBSID should be the 10-digit observation ID)
+# 2. Run this script from root (or anywhere, it's now portable)
 #
 ################################################################################
 
 echo "Starting XMM-Newton Reprocessing..."
 
-# --- 1. CHECK FOR ENVIRONMENT VARIABLES & GET OBSID ---
-if [ -z "${OBS_DIR_ODF}" ]; then
-    echo "ERROR: Environment variable OBS_DIR_ODF is not set."
-    echo "Please set this to the full path of your ODF directory."
-    echo "Example: export OBS_DIR_ODF=/path/to/data/0123456789"
+# --- 1. CHECK FOR ENVIRONMENT VARIABLES & SET PATHS ---
+if [ -z "${PROJECT_ROOT}" ]; then
+    echo "ERROR: Environment variable PROJECT_ROOT is not set."
+    echo "Please set this to the full path of your project directory."
+    echo "Example: export PROJECT_ROOT=/path/to/my_analysis"
+    exit 1
+fi
+
+if [ -z "${OBSID}" ]; then
+    echo "ERROR: Environment variable OBSID is not set."
+    echo "Example: export OBSID=0123456789"
     exit 1
 fi
 
@@ -34,43 +41,33 @@ if [ -z "${SAS_CCFPATH}" ]; then
     exit 1
 fi
 
-echo "Using ODF from: ${OBS_DIR_ODF}"
-echo "Using CCF from: ${SAS_CCFPATH}"
-
-# Assumes OBS_DIR_ODF is /path/to/data/OBSID
-OBSID=$(basename "${OBS_DIR_ODF}")
-
-# Corrected Logic: Check IF ObsID is 10 digits
-if [[ "${OBSID}" =~ ^[0-9]{10}$ ]]; then
-    # If it IS 10 digits, just print it and continue
-    echo "Determined ObsID: ${OBSID}"
-else
-    # If it is NOT 10 digits, print the warning and use the fallback
-    echo "WARNING: Could not reliably determine 10-digit ObsID from OBS_DIR_ODF path ('${OBS_DIR_ODF}'). Got '${OBSID}'."
-    echo "Using default directory name 'unknown_obsid'."
-    OBSID="unknown_obsid" # Fallback directory name
-fi
-
-# Define base product directory including ObsID
-export PROD_OBS_DIR="products/${OBSID}"
-
-# Define instrument-specific directories
+# --- Construct paths from environment variables ---
+# This is now the single source of truth for paths
+export OBS_DIR_ODF="${PROJECT_ROOT}/data/${OBSID}"
+export PROD_OBS_DIR="${PROJECT_ROOT}/products/${OBSID}"
 export PN_DIR="${PROD_OBS_DIR}/pn"
 export RGS_DIR="${PROD_OBS_DIR}/rgs"
 
+echo "Using Project Root: ${PROJECT_ROOT}"
+echo "Using ObsID: ${OBSID}"
+echo "Using ODF from: ${OBS_DIR_ODF}"
+echo "Using CCF from: ${SAS_CCFPATH}"
 echo "Output products will go to: ${PROD_OBS_DIR}/"
-export PROC_DIR=$(pwd) # Save root directory
-
 
 # --- 2. SAS INITIALIZATION ---
 # (Assumes SAS is already initialized in your shell)
-
 
 
 # --- 3. SETUP (cifbuild & odfingest) ---
 echo "--- Running Setup Tasks IN Data Directory ---"
 # Set SAS_ODF to the ODF *directory* for the setup tasks
 export SAS_ODF="${OBS_DIR_ODF}"
+
+# Check if ODF directory exists
+if [ ! -d "${OBS_DIR_ODF}" ]; then
+    echo "ERROR: ODF directory not found: ${OBS_DIR_ODF}"
+    exit 1
+fi
 
 # Change to the ODF directory to run setup tasks
 cd "${OBS_DIR_ODF}" || { echo "Failed to cd to ODF directory: ${OBS_DIR_ODF}. Exiting."; exit 1; }
@@ -82,17 +79,16 @@ cifbuild
 
 if [ ! -f "ccf.cif" ]; then
     echo "cifbuild failed. ccf.cif not found in $(pwd)"
-    cd "${PROC_DIR}" || echo "Warning: Failed to cd back to ${PROC_DIR}"
+    cd "${PROJECT_ROOT}" || echo "Warning: Failed to cd back to ${PROJECT_ROOT}"
     exit 1
 fi
 
 # Set SAS_CCF to the FULL path of the ccf.cif file we just created
-# *** Corrected: Added missing '/' ***
 echo "Setting SAS_CCF..."
-export SAS_CCF="${OBS_DIR_ODF}ccf.cif"
+export SAS_CCF="${OBS_DIR_ODF}/ccf.cif"
 echo "SAS_CCF set to: ${SAS_CCF}"
 
-# *** ADD THIS DEBUG LINE ***
+# *** DEBUG LINE ***
 echo "DEBUG: About to run odfingest. SAS_ODF is currently set to: ${SAS_ODF}"
 # *** END DEBUG LINE ***
 
@@ -106,7 +102,7 @@ SUMMARY_FILE_NAME=$(find . -maxdepth 1 -name "*SUM.SAS" -printf "%f\n" | head -n
 if [ -z "${SUMMARY_FILE_NAME}" ]; then
     echo "odfingest failed. Summary file (*SUM.SAS) not found in $(pwd)."
     echo "Check the log file: $(pwd)/odfingest.log"
-    cd "${PROC_DIR}" || echo "Warning: Failed to cd back to ${PROC_DIR}"
+    cd "${PROJECT_ROOT}" || echo "Warning: Failed to cd back to ${PROJECT_ROOT}"
     exit 1
 fi
 
@@ -117,7 +113,7 @@ echo "Setting SAS_ODF to summary file: ${SAS_ODF}"
 
 # Return to the processing directory (the repository root)
 echo "Returning to root directory..."
-cd "${PROC_DIR}" || { echo "Failed to cd back to processing directory: ${PROC_DIR}. Exiting."; exit 1; }
+cd "${PROJECT_ROOT}" || { echo "Failed to cd back to processing directory: ${PROJECT_ROOT}. Exiting."; exit 1; }
 echo "Now in: $(pwd)"
 echo "Setup complete. SAS_ODF and SAS_CCF point to files inside ${OBS_DIR_ODF}"
 
@@ -131,7 +127,7 @@ echo "Now in $(pwd). Running epproc..."
 
 epproc > epproc.log 2>&1
 echo "epproc complete. Products are in $(pwd)"
-cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}. Exiting."; exit 1; }
+cd "${PROJECT_ROOT}" || { echo "Failed to cd back to ${PROJECT_ROOT}. Exiting."; exit 1; }
 
 
 # --- RGS ---
@@ -141,7 +137,7 @@ cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}. Exiting."; exit 1; }
 echo "Now in $(pwd). Running rgsproc..."
 rgsproc > rgsproc.log 2>&1
 echo "rgsproc complete. Products are in $(pwd)"
-cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}. Exiting."; exit 1; }
+cd "${PROJECT_ROOT}" || { echo "Failed to cd back to ${PROJECT_RGS}. Exiting."; exit 1; }
 
 # --- 5. COMPLETION ---
 echo "--------------------------------------------------"
