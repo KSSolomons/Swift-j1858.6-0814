@@ -28,7 +28,7 @@ LC_BIN_SIZE="100"
 RGS_SOURCE_ID="1"
 
 # --- RGS Flare Filtering ---
-FILTER_RGS1="no"
+FILTER_RGS1="yes"
 FILTER_RGS2="yes"
 RGS_RATE_THRESHOLD="0.12"
 
@@ -48,6 +48,7 @@ fi
 export OBS_DIR_ODF="${PROJECT_ROOT}/data/${OBSID}"
 export RGS_DIR="${PROJECT_ROOT}/products/${OBSID}/rgs"
 export PLOT_DIR="${RGS_DIR}/plots"
+export RGS_FILT="${RGS_DIR}/filt"
 export PROC_DIR="${PROJECT_ROOT}" # Use this, not pwd
 
 if [ ! -d "${OBS_DIR_ODF}" ]; then
@@ -172,39 +173,69 @@ generate_gti() {
     echo "${gti_fits}" # This is the ONLY output to stdout
 }
 
-# --- EDITED FUNCTION: Use rgsproc entrystage=3 ---
+
 run_rgsproc_filter() {
-    local gti1=$1
-    local gti2=$2
-    local log_file="rgsproc_filter.log" # Created within RGS_DIR
+    # These parameters are now JUST the basenames (e.g., "gti_rgs1.fits")
+    local gti1_base=$1 
+    local gti2_base=$2
     
-    local gti_list=""
-    if [ -n "${gti1}" ]; then
-        gti_list="${gti1}"
+    # This log file will be created inside the new 'filt' directory
+    local log_file="rgsproc_filter.log" 
+    
+    # [FIX 1] Create the 'filt' dir and cd into it.
+    # This function now assumes it's being run from RGS_DIR.
+    mkdir -p "filt"
+    cd "filt" || { echo "Failed to cd into filt"; return 1; }
+    echo "Changed directory to $(pwd)" >&2
+
+    # cp to new directory
+    
+    cp -f ../*SRCLI*.FIT .
+    cp -f ../*merged*.FIT .
+    
+    if [ -n "${gti1_base}" ]; then
+        echo "Copying ${gti1_base}..." >&2
+        cp -f ../${gti1_base} .
     fi
-    if [ -n "${gti2}" ]; then
-        if [ -n "${gti_list}" ]; then
-            gti_list="${gti_list},${gti2}" # Comma-separate if both exist
+    
+    if [ -n "${gti2_base}" ]; then
+        echo "Copying ${gti2_base}..." >&2
+        cp -f ../${gti2_base} .
+    fi
+    
+    
+    # Build a comma-separated list of RELATIVE paths
+    local gti_paths_relative=""
+    if [ -n "${gti1_base}" ]; then
+        gti_paths_relative="${gti1_base}"
+    fi
+    if [ -n "${gti2_base}" ]; then
+        if [ -n "${gti_paths_relative}" ]; then
+            gti_paths_relative="${gti_paths_relative} ${gti2_base}"
         else
-            gti_list="${gti2}"
+            gti_paths_relative="${gti2_base}"
         fi
     fi
 
-    if [ -z "${gti_list}" ]; then
+    if [ -z "${gti_paths_relative}" ]; then
          echo "WARNING: Filtering requested but no valid GTI files provided. Skipping rgsproc." >&2
+         cd .. # Go back up
          return
     fi
     
-    echo "Running rgsproc entrystage=3:filter with GTI list: ${gti_list}" >&2
+    echo "Running rgsproc entrystage=3:filter with relative GTI list: ${gti_paths_relative}" >&2
     
-    # This is the command from the SAS guide: re-run from filter stage
-    # rgsproc will automatically find the *merged*.FIT files it needs
-    rgsproc entrystage=3:filter finalstage=5:fluxing orders='1 2' \
-            auxgtitables="${gti_list}" > "${log_file}" 2>&1
+    # [FIX 4] Call rgsproc with the quoted, relative path list.
+    # It will run inside 'filt' and write all new products here.
+    rgsproc entrystage=3:filter finalstage=5:fluxing orders='1 2'\
+            auxgtitables="${gti_paths_relative}" > "${log_file}" 2>&1
 
     echo " -> Log file: ${log_file}" >&2
+    
+    # Go back up to RGS_DIR
+    cd ..
+    echo "Changed directory back to $(pwd)" >&2
 }
-
 # --- END OF FUNCTION DEFINITIONS ---
 
 
@@ -356,29 +387,36 @@ echo ""
 echo "Background lightcurve plots created in ${PLOT_DIR}"
 echo "--> Inspect plots, edit FILTER_RGS1/FILTER_RGS2 in this script, and re-run. <--"
 echo ""
-
+	
 # --- 6. Apply Filter and Re-run rgsproc (Conditional) ---
 if [ "${FILTER_RGS1}" == "yes" ] || [ "${FILTER_RGS2}" == "yes" ]; then
     echo "--- Applying Flare Filter & Re-running rgsproc ---"
     echo "Using count rate threshold: <= ${RGS_RATE_THRESHOLD}"
 
+    # [FIX] Change to RGS_DIR first. All work will be relative to here.
     cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
+    echo "Changed directory to $(pwd)" >&2
     
     GTI1_FILE=""
     GTI2_FILE=""
 
     if [ "${FILTER_RGS1}" == "yes" ]; then
-        GTI1_FILE=$(generate_gti 1)
+        # This function now runs in RGS_DIR and creates gti_rgs1.fits here
+        GTI1_FILE=$(generate_gti 1) 
     fi
     
     if [ "${FILTER_RGS2}" == "yes" ]; then
+        # This function now runs in RGS_DIR and creates gti_rgs2.fits here
         GTI2_FILE=$(generate_gti 2)
     fi
     
-    # Call the filter function
+    # [FIX] Call the filter function, passing ONLY the filenames.
+    # The function itself will handle creating /filt, symlinking, and cd'ing.
     run_rgsproc_filter "${GTI1_FILE}" "${GTI2_FILE}"
 
+    # Return to the main project directory
     cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
+    echo "Changed directory back to $(pwd)" >&2
 
 else
     echo "--- Skipping Flare Filter (FILTER_RGS1/2=no). No rgsproc re-run needed. ---"

@@ -9,6 +9,11 @@
 # Runs 'epiclccorr' for the definitive lightcurve.
 # ** Also creates plots for raw and corrected lightcurves. **
 #
+# ** Applies barycentric correction ('barycen') IN-PLACE
+# ** to the pn_clean.evt:EVENTS HDU. Creates a persistent backup
+# ** 'no_barycorr_pn_clean.fits' on the first run, and restores from
+# ** this backup on subsequent runs to prevent re-correcting.
+#
 # ASSUMES:
 # - $PROJECT_ROOT, $OBSID are set.
 # - HEASOFT and SAS are initialized.
@@ -104,6 +109,8 @@ mkdir -p "${LC_DIR}"
 
 # --- 2. Define filenames ---
 CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
+BACKUP_EVT_FILE="${PN_DIR}/no_barycorr_pn_clean.fits"
+
 SRC_SPEC="${SPEC_DIR}/pn_source_spectrum.fits"
 RMF_FILE="${SPEC_DIR}/pn_rmf.rmf"
 ARF_FILE="${SPEC_DIR}/pn_arf.arf"
@@ -118,6 +125,50 @@ SRC_SPEC_INNER_TEMP="${PN_DIR}/pn_source_spectrum_inner_temp.fits"
 ARF_FILE_FULL_TEMP="${PN_DIR}/pn_arf_full_temp.arf"
 ARF_FILE_INNER_TEMP="${PN_DIR}/pn_arf_inner_temp.arf"
 
+# --- 2b. Apply Barycentric Correction ---
+echo "--- 2b. Applying Barycentric Correction (in-place) ---"
+
+# *** NEW ***: Store current directory and cd into pn dir
+echo "Changing to ${PN_DIR} to run barycen..."
+START_DIR=$(pwd)
+cd "${PN_DIR}" || { echo "Failed to cd to ${PN_DIR}"; exit 1; }
+
+# Define local filenames for barycen
+CLEAN_EVT_FILENAME=$(basename "${CLEAN_EVT_FILE}")
+BACKUP_EVT_FILENAME=$(basename "${BACKUP_EVT_FILE}")
+echo $CLEAN_EVT_FILENAME
+# Check if the backup file (the *original*) already exists.
+if [ ! -f "${BACKUP_EVT_FILENAME}" ]; then
+    # If it doesn't exist, this is the first run.
+    if [ ! -f "${CLEAN_EVT_FILENAME}" ]; then
+        echo "ERROR: Original file ${CLEAN_EVT_FILENAME} not found. Cannot create backup."
+        cd "${START_DIR}" # Go back before exiting
+        exit 1
+    fi
+    
+    echo "Backup file not found. Assuming ${CLEAN_EVT_FILENAME} is the original."
+    echo "Creating backup: ${BACKUP_EVT_FILENAME}"
+    cp "${CLEAN_EVT_FILENAME}" "${BACKUP_EVT_FILENAME}"
+    
+    echo "Running barycen (in-place) on ${CLEAN_EVT_FILENAME}:EVENTS..."
+    barycen table="${CLEAN_EVT_FILENAME}:EVENTS"
+else
+    # If the backup *does* exist, this is a re-run.
+    echo "Backup ${BACKUP_EVT_FILENAME} found."
+    echo "Restoring ${CLEAN_EVT_FILENAME} from backup to ensure fresh correction."
+    cp "${BACKUP_EVT_FILENAME}" "${CLEAN_EVT_FILENAME}"
+    
+    echo "Running barycen (in-place) on ${CLEAN_EVT_FILENAME}:EVENTS..."
+    barycen table="${CLEAN_EVT_FILENAME}:EVENTS"
+fi
+
+echo "Barycen complete. ${CLEAN_EVT_FILENAME} is now barycentered."
+
+# *** NEW ***: Return to original directory
+echo "Returning to ${START_DIR}..."
+cd "${START_DIR}"
+# --- End of Barycen Section ---
+
 # --- 3. Determine Final Spatial Filter Based on Pile-up Flag ---
 if [ "${IS_PILED_UP}" == "yes" ]; then
     FINAL_SRC_RAWX_FILTER="${SRC_RAWX_FILTER_STD} && ${SRC_EXCISION_FILTER}"
@@ -126,6 +177,7 @@ else
     FINAL_SRC_RAWX_FILTER="${SRC_RAWX_FILTER_STD}"
     echo "Using STANDARD spatial filter: ${FINAL_SRC_RAWX_FILTER}"
 fi
+# This check now verifies the *barycentered* file exists.
 if [ ! -f "${CLEAN_EVT_FILE}" ]; then
     echo "ERROR: Could not find ${CLEAN_EVT_FILE}"
     exit 1
@@ -154,7 +206,7 @@ evselect table="${CLEAN_EVT_FILE}" \
     expression="${FINAL_BKG_LC_FILTER_EXPR}"
 
 # --- 3c. Run epiclccorr ---
-# *** REMOVED 'timing=yes' as requested ***
+
 echo "Running epiclccorr to create corrected lightcurve: ${CORR_LC_FILE}"
 epiclccorr srctslist="${SRC_LC_RAW_FILE}" \
     eventlist="${CLEAN_EVT_FILE}" \
@@ -305,6 +357,7 @@ echo "Background spectrum:    ${BKG_SPEC}"
 echo "Response matrix (RMF):  ${RMF_FILE}"
 echo "Ancillary file (ARF):   ${ARF_FILE}"
 echo "Corrected lightcurve:   ${CORR_LC_FILE}"
+echo "Original non-barycorr:  ${BACKUP_EVT_FILE}"
 echo ""
 echo "Plots created in: ${LC_DIR}"
 echo "  - ${LC_SRC_RAW_PNG}"
