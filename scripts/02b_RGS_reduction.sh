@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# SCRIPT: 05_rgs_reduction.sh
+# SCRIPT: 02b_rgs_reduction.sh
 #
 # DESCRIPTION:
 # Performs post-rgsproc RGS data reduction steps for a specific ObsID:
