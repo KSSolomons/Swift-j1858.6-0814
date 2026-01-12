@@ -18,7 +18,7 @@
 # --- CONFIGURATION: EDIT THIS SECTION ---
 
 # 1. Define the Time Interval for the "Dipping Region"
-s
+
 DIP_TIME_FILTER="(TIME IN [701596278.492053:701625198.492053])"
 
 # 2. Define the Single Flux Threshold (Counts/Second)
