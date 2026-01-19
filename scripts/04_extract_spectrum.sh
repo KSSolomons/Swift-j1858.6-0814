@@ -44,7 +44,7 @@ SRC_EXCISION_FILTER="!(RAWX in [36:38])"
 # --- End Pile-up Specific ---
 
 # The grouping specification for the final spectrum
-GROUPING_SPEC="50"
+GROUPING_SPEC="20"
 
 # Time binning for the output lightcurves (in seconds)
 LC_BIN_SIZE="100"
