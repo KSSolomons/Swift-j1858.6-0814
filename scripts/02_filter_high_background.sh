@@ -33,10 +33,10 @@
 # --- USER CONFIGURATION - EDIT THIS SECTION ---
 
 # Set to "yes" to apply the filter, "no" to skip it.
-APPLY_FILTER="no"
+APPLY_FILTER="yes"
 
 # If APPLY_FILTER="yes", set your count rate cutoff here.
-RATE_THRESHOLD="0.4"
+RATE_THRESHOLD="0.3"
 
 # --- END OF CONFIGURATION ---
 
@@ -118,7 +118,7 @@ BKG_EXPR="#XMMEA_EP && (PI in [10000:12000]) && (PATTERN==0)"
 echo "Creating background lightcurve: ${BKG_LC}"
 evselect table="${PN_EVT_FILE}" \
     withrateset=yes rateset="${BKG_LC}" \
-    maketimecolumn=yes timebinsize=100 makeratecolumn=yes \
+    maketimecolumn=yes timebinsize=30 makeratecolumn=yes \
     expression="${BKG_EXPR}"
 
 
@@ -131,7 +131,7 @@ echo "Creating diagnostic plots..."
 # Background Lightcurve (Time vs. Rate)
 echo "  Generating pn_bkg_lc.ps..."
 fplot "pn_bkg_lc.fits[RATE]" xparm="TIME" yparm="RATE" mode='h' device="pn_bkg_lc.ps/PS" </dev/null
-convert -density 300"pn_bkg_lc.ps[0]" pn_bkg_lc.jpg
+convert -density 300 "pn_bkg_lc.ps[0]" pn_bkg_lc.jpg
 echo "  Created ${BKG_LC_PLOT}"
 rm -f "pn_bkg_lc.ps" # Clean up postscript file
 
