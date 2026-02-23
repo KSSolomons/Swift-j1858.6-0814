@@ -1,27 +1,28 @@
 #!/bin/bash
 #
-# SCRIPT: 03b_extract_rgs_time_spectra_robust.sh
+# SCRIPT: 03b_extract_rgs_time_spectra.sh
 #
 # DESCRIPTION:
 # Extracts multiple TIME-FILTERED RGS spectra using the robust 
 # 'entrystage=3:filter' method.
 #
-# LOGIC:
-# 1. Copies EVENLI, SRCLI, and MERGED files to the interval directory.
-# 2. Generates a local GTI based on the time filter.
-# 3. Runs rgsproc locally to apply the combined (Flare + Time) GTIs.
-# 4. Cleans up the copied event files to save disk space.
+# Automatically groups the spectra after extraction using 'ftgrouppha'.
 #
 ################################################################################
 
 # --- CONFIGURATION ---
 
-# Format: "Name|Expression"
+# 1. TIME INTERVALS (Format: "Name|Expression")
 CONFIGS=(
     "Persistent|(TIME IN [701642768.492053:701658528.492053])"
     "Dipping|(TIME IN [701596278.492053:701625198.492053])"
     "Shallow|(TIME IN [701592818.492053:701596278.492053]) || (TIME IN [701625198.492053:701628548.492053]) || (TIME IN [701632768.492053:701642768.492053]) || (TIME IN [701658528.492053:701675918.492053])"
     )
+
+# 2. GROUPING SETTINGS
+# Options: "opt" (Kaastra optimal binning) OR "min" (Minimum counts)
+GROUP_TYPE="opt"
+MIN_COUNTS=20     # Only used if GROUP_TYPE="min"
 
 # --- END CONFIGURATION ---
 
@@ -63,6 +64,62 @@ rename_products() {
     find . -name "*R2*RSPMAT2*.FIT" -exec mv {} "rgs2_o2_${suffix}.rmf" \; 2>/dev/null
 }
 
+# --- FUNCTION: Perform Grouping  ---
+perform_grouping() {
+    local suffix="$1"
+    echo "--- Grouping Spectra (Type: ${GROUP_TYPE}) ---"
+
+    # Iterate over standard RGS output keys
+    for inst in rgs1 rgs2; do
+        for order in o1 o2; do
+            # Construct standard filenames based on rename_products
+            local src="${inst}_src_${order}_${suffix}.fits"
+            local bkg="${inst}_bkg_${order}_${suffix}.fits"
+            local rmf="${inst}_${order}_${suffix}.rmf"
+            local out="${inst}_src_${order}_${suffix}_grp.pha"
+
+            if [ -f "$src" ]; then
+                echo "  Grouping: $src -> $(basename $out)"
+                
+                # Check for RMF/BKG existence to avoid ftool errors
+                local rmf_arg=""
+                local bkg_arg=""
+                
+                if [ -f "$rmf" ]; then rmf_arg="respfile=$rmf"; fi
+                if [ -f "$bkg" ]; then bkg_arg="backfile=$bkg"; fi
+
+                if [ "$GROUP_TYPE" == "opt" ]; then
+                    # Kaastra Optimal Binning
+                    ftgrouppha infile="$src" \
+                               outfile="$out" \
+                               grouptype="opt" \
+                               $rmf_arg \
+                               $bkg_arg \
+                               clobber=yes
+                elif [ "$GROUP_TYPE" == "optmin" ]; then
+                    # Kaastra Optimal Binning with Minimum Counts
+                    ftgrouppha infile="$src" \
+                               outfile="$out" \
+                               grouptype="optmin" \
+                               groupscale="$MIN_COUNTS" \
+                               $rmf_arg \
+                               $bkg_arg \
+                               clobber=yes
+                else
+                    # Minimum Counts Grouping
+                    ftgrouppha infile="$src" \
+                               outfile="$out" \
+                               grouptype="min" \
+                               groupscale="$MIN_COUNTS" \
+                               $rmf_arg \
+                               $bkg_arg \
+                               clobber=yes
+                fi
+            fi
+        done
+    done
+}
+
 # --- FUNCTION: Extract Interval ---
 extract_interval() {
     local name="$1"
@@ -79,8 +136,7 @@ extract_interval() {
     mkdir -p "${work_dir}"
     cd "${work_dir}" || return
     
-    # 1. COPY INPUTS (Including EVENLI now)
-    # rgsproc entrystage=3 needs the events to filter them.
+    # 1. COPY INPUTS
     echo "Copying inputs locally..."
     cp -f ${RGS_DIR}/*EVENLI*.FIT .
     cp -f ${RGS_DIR}/*SRCLI*.FIT .
@@ -89,14 +145,12 @@ extract_interval() {
     # 2. GENERATE LOCAL GTI (Time Filter)
     local interval_gtis=""
     
-    # Check for RGS1 Event List (Local)
     local r1_evt=$(find . -name "*R1*EVENLI*.FIT" | head -n 1)
     if [ -f "${r1_evt}" ]; then
         tabgtigen table="${r1_evt}" expression="${time_expr}" gtiset="gti_time_r1.fits"
         interval_gtis="gti_time_r1.fits"
     fi
 
-    # Check for RGS2 Event List (Local)
     local r2_evt=$(find . -name "*R2*EVENLI*.FIT" | head -n 1)
     if [ -f "${r2_evt}" ]; then
         tabgtigen table="${r2_evt}" expression="${time_expr}" gtiset="gti_time_r2.fits"
@@ -107,20 +161,21 @@ extract_interval() {
     local all_gtis="${flare_gti_list} ${interval_gtis}"
     
     # 4. RUN RGSPROC
-    # We use entrystage=3 (Filter) which will consume the local EVENLI files
     rgsproc orders='1 2' \
             bkgcorrect=yes \
             auxgtitables="${all_gtis}" \
             entrystage=3:filter \
             finalstage=5:fluxing > "rgsproc_${name}.log" 2>&1
             
-    echo "Processing complete. Log: rgsproc_${name}.log"
+    echo "RGSPROC complete. Log: rgsproc_${name}.log"
     
     # 5. RENAME OUTPUTS
     rename_products "${name}"
+
+    # 6. GROUP SPECTRA (Added Step)
+    perform_grouping "${name}"
     
-    # 6. CLEANUP
-    # Remove the massive event files we copied to save space
+    # 7. CLEANUP
     rm -f *EVENLI*.FIT *SRCLI*.FIT *merged*.FIT
     
     cd "${PROC_DIR}" || return
@@ -143,5 +198,5 @@ for config in "${CONFIGS[@]}"; do
 done
 
 echo "=========================================================="
-echo "Extraction Complete. Results in: ${SPEC_DIR}"
+echo "Extraction and Grouping Complete. Results in: ${SPEC_DIR}"
 echo "=========================================================="
