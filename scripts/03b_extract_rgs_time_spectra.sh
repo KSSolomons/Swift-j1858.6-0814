@@ -14,15 +14,16 @@
 
 # 1. TIME INTERVALS (Format: "Name|Expression")
 CONFIGS=(
+    "Full|"
     "Persistent|(TIME IN [701642768.492053:701658528.492053])"
     "Dipping|(TIME IN [701596278.492053:701625198.492053])"
     "Shallow|(TIME IN [701592818.492053:701596278.492053]) || (TIME IN [701625198.492053:701628548.492053]) || (TIME IN [701632768.492053:701642768.492053]) || (TIME IN [701658528.492053:701675918.492053])"
     )
 
 # 2. GROUPING SETTINGS
-# Options: "opt" (Kaastra optimal binning) OR "min" (Minimum counts)
+# Options: "opt" (Kaastra optimal binning) OR optmin OR "min" (Minimum counts)
 GROUP_TYPE="opt"
-MIN_COUNTS=20     # Only used if GROUP_TYPE="min"
+MIN_COUNTS=20     # Only used if GROUP_TYPE not "opt"
 
 # --- END CONFIGURATION ---
 
@@ -124,61 +125,88 @@ perform_grouping() {
 extract_interval() {
     local name="$1"
     local time_expr="$2"
-    local flare_gti_list="$3"
-    
+
     local work_dir="${SPEC_DIR}/${name}"
-    
+
     echo ""
     echo "=========================================================="
     echo "Processing: ${name}"
     echo "=========================================================="
-    
+
     mkdir -p "${work_dir}"
     cd "${work_dir}" || return
-    
-    # 1. COPY INPUTS
-    echo "Copying inputs locally..."
-    cp -f ${RGS_DIR}/*EVENLI*.FIT .
-    cp -f ${RGS_DIR}/*SRCLI*.FIT .
-    cp -f ${RGS_DIR}/*merged*.FIT .
 
-    # 2. GENERATE LOCAL GTI (Time Filter)
-    local interval_gtis=""
-    
-    local r1_evt=$(find . -name "*R1*EVENLI*.FIT" | head -n 1)
-    if [ -f "${r1_evt}" ]; then
-        tabgtigen table="${r1_evt}" expression="${time_expr}" gtiset="gti_time_r1.fits"
-        interval_gtis="gti_time_r1.fits"
-    fi
+    for inst in 1 2; do
+        local evenli_file=$(find ${RGS_DIR} -maxdepth 1 -name "*R${inst}*EVENLI*.FIT" | head -n 1)
+        local srcli_file=$(find ${RGS_DIR} -maxdepth 1 -name "*R${inst}*SRCLI*.FIT" | head -n 1)
+        local merged_file=$(find ${RGS_DIR} -maxdepth 1 -name "*R${inst}*merged*.FIT" | head -n 1)
 
-    local r2_evt=$(find . -name "*R2*EVENLI*.FIT" | head -n 1)
-    if [ -f "${r2_evt}" ]; then
-        tabgtigen table="${r2_evt}" expression="${time_expr}" gtiset="gti_time_r2.fits"
-        interval_gtis="${interval_gtis} gti_time_r2.fits"
-    fi
+        if [ -z "${evenli_file}" ] || [ -z "${srcli_file}" ] || [ -z "${merged_file}" ]; then
+            echo "Skipping RGS${inst} for ${name} (missing input files)."
+            continue
+        fi
 
-    # 3. COMBINE GTIs
-    local all_gtis="${flare_gti_list} ${interval_gtis}"
-    
-    # 4. RUN RGSPROC
-    rgsproc orders='1 2' \
-            bkgcorrect=yes \
-            auxgtitables="${all_gtis}" \
-            entrystage=3:filter \
-            finalstage=5:fluxing > "rgsproc_${name}.log" 2>&1
-            
-    echo "RGSPROC complete. Log: rgsproc_${name}.log"
-    
+        # ---  Extract the exact Exposure ID (e.g., R1S004) ---
+        local evenli_base=$(basename "${evenli_file}")
+        local inst_exp_id=$(echo "${evenli_base}" | grep -o "R[12][SU][0-9]\{3\}")
+
+        mkdir -p "rgs${inst}_tmp"
+        cd "rgs${inst}_tmp" || continue
+
+        # 1. COPY INPUTS FOR THIS SPECIFIC INSTRUMENT
+        cp -f "${evenli_file}" .
+        cp -f "${srcli_file}" .
+        cp -f "${merged_file}" .
+
+        # 2. ASSEMBLE GTIs FOR THIS SPECIFIC INSTRUMENT
+        local inst_gtis=""
+
+        # 2a. Flare GTI
+        if [ -f "${RGS_DIR}/gti_rgs${inst}.fits" ]; then
+            cp -f "${RGS_DIR}/gti_rgs${inst}.fits" .
+            inst_gtis="gti_rgs${inst}.fits"
+        fi
+
+        # 2b. Time Interval GTI
+        if [ -n "${time_expr}" ]; then
+            tabgtigen table="${evenli_base}" expression="${time_expr}" gtiset="gti_time_r${inst}.fits" > /dev/null 2>&1
+            if [ -n "${inst_gtis}" ]; then
+                inst_gtis="${inst_gtis} gti_time_r${inst}.fits"
+            else
+                inst_gtis="gti_time_r${inst}.fits"
+            fi
+        fi
+
+        echo "Running rgsproc for RGS${inst} (${inst_exp_id}) with GTIs: ${inst_gtis:-None}"
+
+        # 3. RUN RGSPROC (Now locked to the specific exposure ID)
+        rgsproc orders='1 2' \
+                bkgcorrect=yes \
+                xpsfexcl=99 \
+                auxgtitables="${inst_gtis}" \
+                withinstexpids=yes \
+                instexpids="${inst_exp_id}" \
+                entrystage=3:filter \
+                finalstage=5:fluxing > "rgsproc_${name}_rgs${inst}.log" 2>&1
+
+        # 4. MOVE OUTPUTS UP AND CLEANUP
+        mv -f *FIT ../ 2>/dev/null || true
+        mv -f *.log ../ 2>/dev/null || true
+
+        cd ..
+        rm -rf "rgs${inst}_tmp"
+    done
+
     # 5. RENAME OUTPUTS
     rename_products "${name}"
 
-    # 6. GROUP SPECTRA (Added Step)
+    # 6. GROUP SPECTRA
     perform_grouping "${name}"
-    
+
     # 7. CLEANUP
     rm -f *EVENLI*.FIT *SRCLI*.FIT *merged*.FIT
     
-    cd "${PROC_DIR}" || return
+    cd "${SPEC_DIR}" || return
 }
 
 # --- MAIN EXECUTION ---

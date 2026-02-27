@@ -135,7 +135,7 @@ echo "--- Running rgsproc (RGS) ---"
 mkdir -p "${RGS_DIR}"
 cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}. Exiting."; exit 1; }
 echo "Now in $(pwd). Running rgsproc..."
-rgsproc > rgsproc.log 2>&1
+rgsproc withsrc=yes srclabel=SRC1 srcra=284.6454 srcdec=-8.2375 xpsfexcl=99 > rgsproc.log 2>&1
 echo "rgsproc complete. Products are in $(pwd)"
 cd "${PROJECT_ROOT}" || { echo "Failed to cd back to ${PROJECT_RGS}. Exiting."; exit 1; }
 

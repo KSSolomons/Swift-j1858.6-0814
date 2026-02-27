@@ -28,9 +28,10 @@ LC_BIN_SIZE="100"
 RGS_SOURCE_ID="1"
 
 # --- RGS Flare Filtering ---
-FILTER_RGS1="yes"
+FILTER_RGS1="no"
 FILTER_RGS2="yes"
-RGS_RATE_THRESHOLD="0.2"
+RGS1_RATE_THRESHOLD="0.2"
+RGS2_RATE_THRESHOLD="0.2"
 
 # --- END OF CONFIGURATION ---
 
@@ -107,8 +108,7 @@ create_rgs_diag_plots() {
     evselect table="${evt_file_base}:EVENTS" \
         imageset="${pi_img}" withimageset=yes \
         xcolumn='M_LAMBDA' ycolumn='PI' \
-        yimagemin=0 yimagemax=3000 \
-        expression="REGION(${src_file_base}:RGS${rgs_num}_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)" > /dev/null
+        yimagemin=0 yimagemax=3000 > /dev/null
 
     echo "Generating RGS${rgs_num} region overlay plot..." >&2
     rm -f "${plot_ps}" # Remove old plot if exists
@@ -119,7 +119,7 @@ create_rgs_diag_plots() {
 
     convert -density 300 "${plot_ps}[0]" "${plot_png}"
     rm -f "${plot_ps}" # Cleanup
-    
+
     echo " -> ${plot_png}" >&2
 }
 
@@ -136,7 +136,7 @@ create_rgs_bkg_lc() {
         return
     fi
 
-    local bkg_expr="(CCDNR==9)&&(REGION(${src_file_base}:RGS${rgs_num}_BACKGROUND,M_LAMBDA,XDSP_CORR))"
+    local bkg_expr="(CCDNR==9)"
 
     echo "Creating RGS${rgs_num} background lightcurve (${lc_fits})..." >&2
     evselect table="${evt_file_base}" \
@@ -145,94 +145,92 @@ create_rgs_bkg_lc() {
         expression="${bkg_expr}" > /dev/null
 
     echo "Generating RGS${rgs_num} background lightcurve plot..." >&2
-    
+
     fplot "${lc_fits}[RATE]" xparm="TIME" yparm="RATE" \
         device="${lc_ps}/CPS" mode="h" </dev/null
 
     convert -density 300 "${lc_ps}[0]" "${lc_png}"
-    
-    
+
+
     echo " -> ${lc_png}" >&2
 }
 
 generate_gti() {
     local rgs_num=$1
+    local threshold=$2
     local lc_fits="rgs${rgs_num}_bkg_lc.fits"
     local gti_fits="gti_rgs${rgs_num}.fits" # Created within RGS_DIR
 
     if [ ! -f "${lc_fits}" ]; then
         echo "Skipping GTI generation for RGS${rgs_num} (missing lightcurve file)." >&2
-        return "" # Return empty string
+        return
     fi
 
-    echo "Generating GTI for RGS${rgs_num}: ${gti_fits}" >&2
-    
+    echo "Generating GTI for RGS${rgs_num}: ${gti_fits} with threshold <= ${threshold}" >&2
+
     # Redirect stdout of tabgtigen to /dev/null so it doesn't get captured
-    tabgtigen table="${lc_fits}" expression="RATE<=${RGS_RATE_THRESHOLD}" gtiset="${gti_fits}" > /dev/null
+    tabgtigen table="${lc_fits}" expression="RATE<=${threshold}" gtiset="${gti_fits}" > /dev/null
 
     echo "${gti_fits}" # This is the ONLY output to stdout
 }
 
 
 run_rgsproc_filter() {
-    # These parameters are now JUST the basenames (e.g., "gti_rgs1.fits")
-    local gti1_base=$1 
+    local gti1_base=$1
     local gti2_base=$2
-    
-    # This log file will be created inside the new 'filt' directory
-    local log_file="rgsproc_filter.log" 
-    
-    # [FIX 1] Create the 'filt' dir and cd into it.
-    # This function now assumes it's being run from RGS_DIR.
+
     mkdir -p "filt"
     cd "filt" || { echo "Failed to cd into filt"; return 1; }
     echo "Changed directory to $(pwd)" >&2
 
-    # cp to new directory
-    
-    cp -f ../*SRCLI*.FIT .
-    cp -f ../*merged*.FIT .
-    
-    if [ -n "${gti1_base}" ]; then
-        echo "Copying ${gti1_base}..." >&2
-        cp -f ../${gti1_base} .
-    fi
-    
-    if [ -n "${gti2_base}" ]; then
-        echo "Copying ${gti2_base}..." >&2
-        cp -f ../${gti2_base} .
-    fi
-    
-    
-    # Build a comma-separated list of RELATIVE paths
-    local gti_paths_relative=""
-    if [ -n "${gti1_base}" ]; then
-        gti_paths_relative="${gti1_base}"
-    fi
-    if [ -n "${gti2_base}" ]; then
-        if [ -n "${gti_paths_relative}" ]; then
-            gti_paths_relative="${gti_paths_relative} ${gti2_base}"
-        else
-            gti_paths_relative="${gti2_base}"
+    for inst in 1 2; do
+        # Locate files specific to this instrument
+        local srcli_file=$(find ../ -maxdepth 1 -name "*R${inst}*SRCLI*.FIT" | head -n 1)
+        local merged_file=$(find ../ -maxdepth 1 -name "*R${inst}*merged*.FIT" | head -n 1)
+
+        if [ -z "${merged_file}" ] || [ -z "${srcli_file}" ]; then
+            continue
         fi
-    fi
 
-    if [ -z "${gti_paths_relative}" ]; then
-         echo "WARNING: Filtering requested but no valid GTI files provided. Skipping rgsproc." >&2
-         cd .. # Go back up
-         return
-    fi
-    
-    echo "Running rgsproc entrystage=3:filter with relative GTI list: ${gti_paths_relative}" >&2
-    
-    # [FIX 4] Call rgsproc with the quoted, relative path list.
-    # It will run inside 'filt' and write all new products here.
-    rgsproc entrystage=3:filter finalstage=5:fluxing orders='1 2'\
-            auxgtitables="${gti_paths_relative}" > "${log_file}" 2>&1
+        # ---  Extract the exact Exposure ID ---
+        local srcli_base=$(basename "${srcli_file}")
+        local inst_exp_id=$(echo "${srcli_base}" | grep -o "R[12][SU][0-9]\{3\}")
 
-    echo " -> Log file: ${log_file}" >&2
-    
-    # Go back up to RGS_DIR
+        mkdir -p "rgs${inst}_tmp"
+        cd "rgs${inst}_tmp" || continue
+
+        cp -f "${srcli_file}" .
+        cp -f "${merged_file}" .
+
+        # Determine the correct GTI for this instrument
+        local inst_gti=""
+        if [ "${inst}" -eq 1 ] && [ -n "${gti1_base}" ] && [ -f "../../${gti1_base}" ]; then
+            cp -f "../../${gti1_base}" .
+            inst_gti="${gti1_base}"
+        elif [ "${inst}" -eq 2 ] && [ -n "${gti2_base}" ] && [ -f "../../${gti2_base}" ]; then
+            cp -f "../../${gti2_base}" .
+            inst_gti="${gti2_base}"
+        fi
+
+        echo "Running rgsproc entrystage=3:filter for RGS${inst} (${inst_exp_id}) with GTI: ${inst_gti:-None}" >&2
+
+        # Run rgsproc locked to the specific exposure ID
+        rgsproc entrystage=3:filter \
+                finalstage=5:fluxing \
+                orders='1 2' \
+                xpsfexcl=99 \
+                auxgtitables="${inst_gti}" \
+                withinstexpids=yes \
+                instexpids="${inst_exp_id}" > "rgsproc_filter_rgs${inst}.log" 2>&1
+
+        # Move generated products back to the filt directory
+        mv -f *FIT ../ 2>/dev/null || true
+        mv -f *.log ../ 2>/dev/null || true
+
+        cd ..
+        rm -rf "rgs${inst}_tmp"
+    done
+
     cd ..
     echo "Changed directory back to $(pwd)" >&2
 }
@@ -282,10 +280,10 @@ echo "Found Files:"
 if [ "${CREATE_DIAGNOSTIC_PLOTS}" == "yes" ]; then
     echo "--- Creating Diagnostic Plots ---"
     cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
-    
+
     create_rgs_diag_plots 1 "$(basename "${RGS1_EVT_FILE}")" "$(basename "${RGS1_SRC_FILE}")"
     create_rgs_diag_plots 2 "$(basename "${RGS2_EVT_FILE}")" "$(basename "${RGS2_SRC_FILE}")"
-    
+
     cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
     echo "Diagnostic plots created (if applicable) in ${PLOT_DIR}"
 fi
@@ -320,13 +318,11 @@ if [ -n "${RGS1_EVT_FILE}" ]; then
     echo "Creating RGS1 raw source lightcurve..." >&2
     RGS1_EVT_BASE=$(basename "${RGS1_EVT_FILE}")
     RGS1_SRC_BASE=$(basename "${RGS1_SRC_FILE}")
-    SRC_EXPR_1="REGION(${RGS1_SRC_BASE}:RGS1_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)"
-    
+
     evselect table="${RGS1_EVT_BASE}" \
         withrateset=yes rateset="${LC1_RAW_FILE}" \
-        maketimecolumn=yes timebinsize=${LC_BIN_SIZE} makeratecolumn=yes \
-        expression="${SRC_EXPR_1}" > /dev/null
-        
+        maketimecolumn=yes timebinsize=${LC_BIN_SIZE} makeratecolumn=yes > /dev/null
+
     echo "Plotting RGS1 raw source lightcurve..." >&2
     fplot "${LC1_RAW_FILE}[RATE]" xparm="TIME" yparm="RATE" \
         device="${LC1_PLOT_PS}/CPS" mode="h" </dev/null
@@ -339,13 +335,11 @@ if [ -n "${RGS2_EVT_FILE}" ]; then
     echo "Creating RGS2 raw source lightcurve..." >&2
     RGS2_EVT_BASE=$(basename "${RGS2_EVT_FILE}")
     RGS2_SRC_BASE=$(basename "${RGS2_SRC_FILE}")
-    SRC_EXPR_2="REGION(${RGS2_SRC_BASE}:RGS2_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)"
-    
+
     evselect table="${RGS2_EVT_BASE}" \
         withrateset=yes rateset="${LC2_RAW_FILE}" \
-        maketimecolumn=yes timebinsize=${LC_BIN_SIZE} makeratecolumn=yes \
-        expression="${SRC_EXPR_2}" > /dev/null
-        
+        maketimecolumn=yes timebinsize=${LC_BIN_SIZE} makeratecolumn=yes > /dev/null
+
     echo "Plotting RGS2 raw source lightcurve..." >&2
     fplot "${LC2_RAW_FILE}[RATE]" xparm="TIME" yparm="RATE" \
         device="${LC2_PLOT_PS}/CPS" mode="h" </dev/null
@@ -385,29 +379,29 @@ cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
 
 echo ""
 echo "Background lightcurve plots created in ${PLOT_DIR}"
-echo "--> Inspect plots, edit FILTER_RGS1/FILTER_RGS2 in this script, and re-run. <--"
+echo "--> Inspect plots, edit FILTER_RGS1/FILTER_RGS2 and thresholds in this script, and re-run. <--"
 echo ""
-	
+
 # --- 6. Apply Filter and Re-run rgsproc (Conditional) ---
 if [ "${FILTER_RGS1}" == "yes" ] || [ "${FILTER_RGS2}" == "yes" ]; then
     echo "--- Applying Flare Filter & Re-running rgsproc ---"
-    echo "Using count rate threshold: <= ${RGS_RATE_THRESHOLD}"
+    echo "Using count rate thresholds: RGS1 <= ${RGS1_RATE_THRESHOLD}, RGS2 <= ${RGS2_RATE_THRESHOLD}"
 
     # [FIX] Change to RGS_DIR first. All work will be relative to here.
     cd "${RGS_DIR}" || { echo "Failed to cd into ${RGS_DIR}"; exit 1; }
     echo "Changed directory to $(pwd)" >&2
-    
+
     GTI1_FILE=""
     GTI2_FILE=""
 
     if [ "${FILTER_RGS1}" == "yes" ]; then
         # This function now runs in RGS_DIR and creates gti_rgs1.fits here
-        GTI1_FILE=$(generate_gti 1) 
+        GTI1_FILE=$(generate_gti 1 "${RGS1_RATE_THRESHOLD}")
     fi
-    
+
     if [ "${FILTER_RGS2}" == "yes" ]; then
         # This function now runs in RGS_DIR and creates gti_rgs2.fits here
-        GTI2_FILE=$(generate_gti 2)
+        GTI2_FILE=$(generate_gti 2 "${RGS2_RATE_THRESHOLD}")
     fi
     
     # [FIX] Call the filter function, passing ONLY the filenames.
