@@ -36,7 +36,7 @@ IS_PILED_UP="yes"
 SRC_RAWX_FILTER_STD="RAWX in [27:47]"
 
 # The BACKGROUND region (used always)
-BKG_RAWX_FILTER="RAWX in [3:5]"
+BKG_RAWX_FILTER="RAWX in [1:3]"
 
 # --- Only needed if IS_PILED_UP="yes" ---
 # The PILE-UP EXCISION filter (the columns to REMOVE from SRC_RAWX_FILTER_STD)

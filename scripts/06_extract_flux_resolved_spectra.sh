@@ -23,7 +23,7 @@ DIP_TIME_FILTER="(TIME IN [701596278.492053:701625198.492053])"
 
 # 2. Define the Single Flux Threshold (Counts/Second)
 # Everything below this is "Low Flux", everything above is "High Flux"
-FLUX_THRESHOLD=4.06378238341969
+FLUX_THRESHOLD=4.3849687576293945
 
 # 3. Bin Size for Rate Calculation
 # We use 1.0s to capture rapid changes in flux.
@@ -64,24 +64,37 @@ set -e
 echo "--- Starting Flux-Resolved Extraction (2 Bins) ---"
 
 # ==============================================================================
-# STEP 1: GENERATE TEMPORARY RATE REFERENCE (RAW LIGHTCURVE)
+# STEP 1: GENERATE CORRECTED RATE REFERENCE (LIGHTCURVE)
 # ==============================================================================
-# We create a 1.0s bin lightcurve so tabgtigen has a 'RATE' column to read.
+# We create a 1.0s bin corrected lightcurve so tabgtigen has a accurate 'RATE' column to read.
 
-REF_LIGHTCURVE="${FLUX_RES_DIR}/temp_calc_rate.fits"
+REF_LIGHTCURVE="${FLUX_RES_DIR}/temp_calc_rate_corrected.fits"
+TEMP_SRC_LC="${FLUX_RES_DIR}/temp_src_lc.fits"
+TEMP_BKG_LC="${FLUX_RES_DIR}/temp_bkg_lc.fits"
 
-echo "Calculating count rates (creating temp 1s lightcurve)..."
+echo "Calculating corrected count rates (running epiclccorr)..."
 
-# NOTE: We use the FULL source region (ignoring pile-up excision) for the RATE.
-# This ensures we trigger based on the 'Observed Rate'.
-LC_EXPR="(FLAG==0) && (PATTERN<=4) && PI in [500:10000] && ${SRC_RAWX_FILTER_STD}"
-
+# Source uncorrected lightcurve
+LC_EXPR_SRC="(FLAG==0) && (PATTERN<=4) && PI in [500:10000] && ${SRC_RAWX_FILTER_STD}"
 evselect table="${CLEAN_EVT_FILE}" \
-    withrateset=yes rateset="${REF_LIGHTCURVE}" \
+    withrateset=yes rateset="${TEMP_SRC_LC}" \
     timebinsize="${LC_BIN_SIZE}" maketimecolumn=yes \
     makeratecolumn=yes \
-    expression="${LC_EXPR}" \
+    expression="${LC_EXPR_SRC}" \
     energycolumn=PI
+
+# Background uncorrected lightcurve
+LC_EXPR_BKG="(FLAG==0) && (PATTERN<=4) && PI in [500:10000] && ${BKG_RAWX_FILTER}"
+evselect table="${CLEAN_EVT_FILE}" \
+    withrateset=yes rateset="${TEMP_BKG_LC}" \
+    timebinsize="${LC_BIN_SIZE}" maketimecolumn=yes \
+    makeratecolumn=yes \
+    expression="${LC_EXPR_BKG}" \
+    energycolumn=PI
+
+# Correct the lightcurve
+epiclccorr srctslist="${TEMP_SRC_LC}" eventlist="${CLEAN_EVT_FILE}" \
+    outset="${REF_LIGHTCURVE}" bkgtslist="${TEMP_BKG_LC}" withbkgset=yes applyabsolutecorrections=yes
 
 # ==============================================================================
 # STEP 2: DEFINE FILTERS AND LOOP
@@ -189,8 +202,8 @@ for (( i=0; i<${#FILTER_EXPRESSIONS[@]}; i++ )); do
 done
 
 # --- 3. CLEAN UP ---
-# Remove the temporary rate calculator file
-rm "${REF_LIGHTCURVE}"
+# Remove the temporary rate calculator files
+rm "${REF_LIGHTCURVE}" "${TEMP_SRC_LC}" "${TEMP_BKG_LC}"
 
 echo "=========================================================="
 echo "Extraction Complete. Output in: ${FLUX_RES_DIR}"

@@ -54,18 +54,39 @@ create_reference_lc() {
     local pn_evt="$1"
     local out_lc="$2"
     
-    echo "Creating Reference PN Lightcurve..." >&2
-    
+    local temp_src="${FLUX_DIR}/temp_pn_src_lc.fits"
+    local temp_bkg="${FLUX_DIR}/temp_pn_bkg_lc.fits"
+
+    echo "Creating Corrected Reference PN Lightcurve..." >&2
+
     # Standard PN Source Region for Rate
-    local expr="(FLAG==0) && (PATTERN<=4) && PI in [500:10000] && RAWX in [27:47]"
-    
+    local expr_src="(FLAG==0) && (PATTERN<=4) && PI in [500:10000] && RAWX in [27:47]"
+    # Standard PN Background Region
+    local expr_bkg="(FLAG==0) && (PATTERN<=4) && PI in [500:10000] && RAWX in [3:5]"
+
+    # Extract uncorrected source lightcurve
     evselect table="${pn_evt}" \
-        withrateset=yes rateset="${out_lc}" \
+        withrateset=yes rateset="${temp_src}" \
         timebinsize="${LC_BIN_SIZE}" maketimecolumn=yes \
         makeratecolumn=yes \
-        expression="${expr}" \
+        expression="${expr_src}" \
+        energycolumn=PI > /dev/null
+
+    # Extract uncorrected background lightcurve
+    evselect table="${pn_evt}" \
+        withrateset=yes rateset="${temp_bkg}" \
+        timebinsize="${LC_BIN_SIZE}" maketimecolumn=yes \
+        makeratecolumn=yes \
+        expression="${expr_bkg}" \
         energycolumn=PI > /dev/null
         
+    # Run epiclccorr for the final corrected lightcurve
+    epiclccorr srctslist="${temp_src}" eventlist="${pn_evt}" \
+        outset="${out_lc}" bkgtslist="${temp_bkg}" withbkgset=yes applyabsolutecorrections=yes > /dev/null
+
+    # Clean up intermediate lightcurves
+    rm -f "${temp_src}" "${temp_bkg}"
+
     echo " -> ${out_lc}" >&2
 }
 
