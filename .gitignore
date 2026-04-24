@@ -49,3 +49,6 @@ Thumbs.db
 *.xml
 *.iml
 .ipynb_checkpoints/
+
+# === SPEX Temporary Files ===
+*.dum
