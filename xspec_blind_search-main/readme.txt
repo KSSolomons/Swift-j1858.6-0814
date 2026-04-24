@@ -1,0 +1,1 @@
+You basically have to be in the folder with the data, and have a .xcm file for the continuum fit as well. In setup.txt you can define all the input, and with @gridsearch.tcl you then run the code in xspec

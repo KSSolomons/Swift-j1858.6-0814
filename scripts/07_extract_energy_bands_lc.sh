@@ -1,44 +1,65 @@
 #!/bin/bash
 # SCRIPT: 07_extract_energy_bands_lc.sh
-# DESCRIPTION: Extracts energy-resolved source and background light curves (Soft: 0.5-2.0 keV, Hard: 2.0-10.0 keV).
+# DESCRIPTION: Extract energy-resolved pn light curves for the soft (0.5-2.0 keV) and hard (2.0-10.0 keV) bands.
+
+set -euo pipefail
 
 # --- USER CONFIGURATION - EDIT THIS SECTION ---
 
-# Set to "yes" if epatplot showed pile-up, otherwise "no".
-IS_PILED_UP="no"
-
-# The standard (FULL) source region.
+# Standard (full) source region.
 SRC_RAWX_FILTER_STD="RAWX in [27:47]"
 
-# The BACKGROUND region (used always)
+# Background region (always used).
 BKG_RAWX_FILTER="RAWX in [1:3]"
 
-# --- Only needed if IS_PILED_UP="yes" ---
-# The PILE-UP EXCISION filter (the columns to REMOVE from SRC_RAWX_FILTER_STD)
+# Columns to remove from the full source region when making pile-up-excised products.
 SRC_EXCISION_FILTER="!(RAWX in [36:38])"
-# --- End Pile-up Specific ---
 
-# Time binning for the output lightcurves (in seconds)
+# Time binning for the output light curves (seconds).
 LC_BIN_SIZE="100"
 
 # --- END OF CONFIGURATION ---
 
-if [ -z "${PROJECT_ROOT}" ] || [ -z "${OBSID}" ]; then
+if [[ -z "${PROJECT_ROOT:-}" || -z "${OBSID:-}" ]]; then
     echo "ERROR: PROJECT_ROOT or OBSID is not set."
     exit 1
 fi
 
-export SAS_CCFPATH="/home/kyle/CCF"
-export SAS_CCF="${PROJECT_ROOT}/data/${OBSID}/ccf.cif"
-export SAS_ODF=$(find "${PROJECT_ROOT}/data/${OBSID}" -name "*SUM.SAS" | head -n 1)
-
-if [ -n "${SAS_PATH}" ] && [ -z "${SAS_DIR}" ]; then
+if [[ -n "${SAS_PATH:-}" && -z "${SAS_DIR:-}" ]]; then
     export SAS_DIR="${SAS_PATH}"
 fi
+
+export SAS_CCFPATH="/home/kyle/CCF"
+export SAS_CCF="${PROJECT_ROOT}/data/${OBSID}/ccf.cif"
+
+if [[ ! -f "${SAS_CCF}" ]]; then
+    echo "ERROR: SAS calibration file not found: ${SAS_CCF}"
+    exit 1
+fi
+
+SAS_ODF="$(find "${PROJECT_ROOT}/data/${OBSID}" -name '*SUM.SAS' -print -quit)"
+if [[ -z "${SAS_ODF}" ]]; then
+    echo "ERROR: Could not find a *SUM.SAS file under ${PROJECT_ROOT}/data/${OBSID}."
+    exit 1
+fi
+export SAS_ODF
 
 PN_DIR="${PROJECT_ROOT}/products/${OBSID}/pn"
 CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 LC_DIR="${PN_DIR}/lc"
+
+for cmd in evselect epiclccorr; do
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+        echo "ERROR: ${cmd} is not available in PATH. Load SAS before running this script."
+        exit 1
+    fi
+done
+
+if [[ ! -f "${CLEAN_EVT_FILE}" ]]; then
+    echo "ERROR: Clean event file not found: ${CLEAN_EVT_FILE}"
+    exit 1
+fi
+
 mkdir -p "${LC_DIR}"
 
 FILTER_FULL="${SRC_RAWX_FILTER_STD}"
@@ -52,41 +73,54 @@ extract_band_lc() {
     local filter_expr=$5
 
     echo "=== Extracting ${band_name} band (${pi_min}-${pi_max} eV) [${suffix}] ==="
-    local PI_EXPR="PI in [${pi_min}:${pi_max}]"
-    local LC_BASE_FILTER="(FLAG==0)&&(PATTERN<=4)&&(${PI_EXPR})"
-    local SRC_EXPR="${LC_BASE_FILTER} && ${filter_expr}"
-    local BKG_EXPR="${LC_BASE_FILTER} && ${BKG_RAWX_FILTER}"
 
-    local SRC_RAW="${LC_DIR}/pn_source_lc_raw_${band_name}_${suffix}.fits"
-    local BKG_RAW="${LC_DIR}/pn_bkg_lc_raw_${band_name}_${suffix}.fits"
-    local SRC_CORR="${LC_DIR}/pn_source_lc_corrected_${band_name}_${suffix}.fits"
+    local pi_expr="PI in [${pi_min}:${pi_max}]"
+    local lc_base_filter="(FLAG==0)&&(PATTERN<=4)&&(${pi_expr})"
+    local src_expr="${lc_base_filter} && ${filter_expr}"
+    local bkg_expr="${lc_base_filter} && ${BKG_RAWX_FILTER}"
 
-    evselect table="${CLEAN_EVT_FILE}" \
-        withrateset=yes rateset="${SRC_RAW}" \
-        maketimecolumn=yes timebinsize="${LC_BIN_SIZE}" \
-        makeratecolumn=yes \
-        expression="${SRC_EXPR}"
+    local src_raw="${LC_DIR}/pn_source_lc_raw_${band_name}_${suffix}.fits"
+    local bkg_raw="${LC_DIR}/pn_bkg_lc_raw_${band_name}_${suffix}.fits"
+    local src_corr="${LC_DIR}/pn_source_lc_corrected_${band_name}_${suffix}.fits"
 
     evselect table="${CLEAN_EVT_FILE}" \
-        withrateset=yes rateset="${BKG_RAW}" \
+        withrateset=yes rateset="${src_raw}" \
         maketimecolumn=yes timebinsize="${LC_BIN_SIZE}" \
         makeratecolumn=yes \
-        expression="${BKG_EXPR}"
+        expression="${src_expr}"
 
-    epiclccorr srctslist="${SRC_RAW}" \
+    evselect table="${CLEAN_EVT_FILE}" \
+        withrateset=yes rateset="${bkg_raw}" \
+        maketimecolumn=yes timebinsize="${LC_BIN_SIZE}" \
+        makeratecolumn=yes \
+        expression="${bkg_expr}"
+
+    epiclccorr srctslist="${src_raw}" \
         eventlist="${CLEAN_EVT_FILE}" \
-        outset="${SRC_CORR}" \
-        bkgtslist="${BKG_RAW}" \
+        outset="${src_corr}" \
+        bkgtslist="${bkg_raw}" \
         withbkgset=yes \
         applyabsolutecorrections=yes
 }
 
-# Extract FULL regions (No pile-up correction)
-extract_band_lc "soft" 500 2000 "full" "${FILTER_FULL}"
-extract_band_lc "hard" 2000 10000 "full" "${FILTER_FULL}"
+band_names=(soft hard)
+band_pi_min=(500 2000)
+band_pi_max=(2000 10000)
+region_suffixes=(full excised)
+region_filters=("${FILTER_FULL}" "${FILTER_EXCISED}")
 
-# Extract EXCISED regions (Pile-up corrected)
-extract_band_lc "soft" 500 2000 "excised" "${FILTER_EXCISED}"
-extract_band_lc "hard" 2000 10000 "excised" "${FILTER_EXCISED}"
+for region_index in "${!region_suffixes[@]}"; do
+    suffix="${region_suffixes[region_index]}"
+    filter_expr="${region_filters[region_index]}"
+
+    for band_index in "${!band_names[@]}"; do
+        extract_band_lc \
+            "${band_names[band_index]}" \
+            "${band_pi_min[band_index]}" \
+            "${band_pi_max[band_index]}" \
+            "${suffix}" \
+            "${filter_expr}"
+    done
+done
 
 echo "=== Done extracting energy-resolved light curves ==="

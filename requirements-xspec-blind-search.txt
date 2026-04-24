@@ -1,0 +1,6 @@
+# Dependencies for scripts/xspec_blind_search/
+# NOTE: PyXspec (import name: xspec) is provided by HEASOFT and is not pip-installable.
+numpy>=1.24
+pandas>=1.5
+matplotlib>=3.6
+

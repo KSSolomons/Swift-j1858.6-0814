@@ -34,14 +34,14 @@ SRC_RAWX_FILTER="RAWX in [27:47]"
 
 # Set the RAWX filter for your BACKGROUND
 # Example: "RAWX in [3:5]"
-BKG_RAWX_FILTER="RAWX in [3:5]"
+BKG_RAWX_FILTER="RAWX in [1:3]"
 
 # --- Pile-up Excision Test ---
 # Set this to "yes" to run the test
 RUN_EXCISION_TEST="yes"
 
 # Set the filter for the central columns you want to REMOVE
-SRC_EXCISION_FILTER="!(RAWX in [36:38])"
+SRC_EXCISION_FILTER="!(RAWX in [36:38])" # Example: excise RAWX=37 only
 
 # --- END OF CONFIGURATION ---
 

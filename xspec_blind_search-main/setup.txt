@@ -1,0 +1,43 @@
+### setup file for both gridsearch.tcl and the plotting python functions. 
+# parameters/values/strings need to be added in the following order:
+# source
+# instrument
+# obsid
+# binning
+# modeltype
+# cstat boolean
+# freeze continuum boolean
+# fit continuum boolean
+# saveplots boolean
+# Lmin
+# Lmax
+# dL
+# velocitywidth in km/w
+# continuum file, with @
+# linemodel
+# numpars (including gaussian line)
+# spectra: one per line.
+#
+# NOTE: the line search contains a cutoff at 18.5 Angstrom (inclusive) when two RGS 
+# spectra a loaded and the upper wavelength limit exceeds 18.5 Angstrom. This can 
+# easily be changed by setting the value of RGS_maxA to a different value (such as $Lhigh)
+# 
+# NOTE: 0.05 stepsize is 0.01 for the actual science, but that is too slow for the simulations
+###########################################################################################
+1RXSJ180408
+HEG
+GainShift
+bin1
+1RXSJ180408_continuum_only_HEG_gainshift
+1
+1
+0
+0
+4.13
+12.4
+0.01
+1000.0
+@1RXSJ180408_continuum_HEG_Gainshift.xcm
+tbabs*(bbody+diskbb) + gauss
+8
+mydata_heg_pm_heg_abs1_grp20.pha

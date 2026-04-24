@@ -187,7 +187,7 @@ fi
 # Use the user-requested energy range for LCs
 # *** RESTORED PI FILTER AS REQUESTED ***
 LC_BASE_FILTER_EXPR="(FLAG==0)&&(PATTERN<=4)&&(PI in [500:10000])"
-# *** RESTORED piled-up filter for source LC ***
+# Use the standard full region for the lightcurve, no pile-up excision needed
 FINAL_SRC_LC_FILTER_EXPR="${LC_BASE_FILTER_EXPR} && ${SRC_RAWX_FILTER_STD}"
 FINAL_BKG_LC_FILTER_EXPR="${LC_BASE_FILTER_EXPR} && ${BKG_RAWX_FILTER}"
 

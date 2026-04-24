@@ -1,0 +1,6 @@
+# Minimal dependencies for scripts/spex_port/
+# Keep this separate from SAS/HEASOFT system tooling.
+numpy>=1.24
+pyspextools
+pyspex
+
