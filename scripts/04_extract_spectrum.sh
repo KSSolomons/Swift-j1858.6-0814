@@ -30,7 +30,9 @@
 # --- USER CONFIGURATION - EDIT THIS SECTION ---
 
 # Set to "yes" if epatplot showed pile-up, otherwise "no".
-IS_PILED_UP="yes"
+# NOTE: Pile-up destruction fraction diagnostic (2026-04-27) confirmed
+# <1.5% destruction in the PSF core (RAWX 35-40). No excision needed.
+IS_PILED_UP="no"
 
 # The standard (FULL) source region.
 SRC_RAWX_FILTER_STD="RAWX in [27:47]"

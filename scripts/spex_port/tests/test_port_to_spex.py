@@ -32,35 +32,35 @@ class PortToSpexResolverTests(unittest.TestCase):
         p.touch()
         return p
 
-    def test_resolve_pn_prefers_grouped_pha(self):
-        self._touch(f"{self.obsid}/pn/spec/pn_source_Dipping_grp.fits")
-        pha = self._touch(f"{self.obsid}/pn/spec/pn_source_Dipping_grp.pha")
+    def test_resolve_pn_ungrouped(self):
+        """port_to_spex always works with ungrouped spectra."""
+        spec = self._touch(f"{self.obsid}/pn/spec/pn_source_Dipping.fits")
         self._touch(f"{self.obsid}/pn/spec/pn_bkg_Dipping.fits")
         self._touch(f"{self.obsid}/pn/spec/pn_rmf_Dipping.rmf")
         self._touch(f"{self.obsid}/pn/spec/pn_arf_Dipping.arf")
 
-        ds = pts.resolve_pn_dataset(self.root, self.obsid, "Dipping", grouped=True)
-        self.assertEqual(ds.spec, pha)
+        ds = pts.resolve_pn_dataset(self.root, self.obsid, "Dipping")
+        self.assertEqual(ds.spec, spec)
 
     def test_resolve_pn_flux_resolved_fallback(self):
-        spec = self._touch(f"{self.obsid}/pn/spec/flux_resolved/pn_source_Dipping_HighFlux_grp.pha")
+        spec = self._touch(f"{self.obsid}/pn/spec/flux_resolved/pn_source_Dipping_HighFlux.fits")
         bkg = self._touch(f"{self.obsid}/pn/spec/flux_resolved/pn_bkg_Dipping_HighFlux.fits")
         rmf = self._touch(f"{self.obsid}/pn/spec/flux_resolved/pn_rmf_Dipping_HighFlux.rmf")
         arf = self._touch(f"{self.obsid}/pn/spec/flux_resolved/pn_arf_Dipping_HighFlux.arf")
 
-        ds = pts.resolve_pn_dataset(self.root, self.obsid, "Dipping_HighFlux", grouped=True)
+        ds = pts.resolve_pn_dataset(self.root, self.obsid, "Dipping_HighFlux")
         self.assertEqual(ds.spec, spec)
         self.assertEqual(ds.bkg, bkg)
         self.assertEqual(ds.rmf, rmf)
         self.assertEqual(ds.arf, arf)
 
-    def test_resolve_rgs_grouped_case_insensitive(self):
+    def test_resolve_rgs_case_insensitive(self):
         base = f"{self.obsid}/rgs/time_intervals/Full"
-        spec = self._touch(f"{base}/rgs1_src_o1_Full_grp.pha")
+        spec = self._touch(f"{base}/rgs1_src_o1_Full.fits")
         bkg = self._touch(f"{base}/RGS1_BKG_O1_FULL.FITS")
         rmf = self._touch(f"{base}/rgs1_o1_Full.rmf")
 
-        datasets = pts.resolve_rgs_datasets(self.root, self.obsid, "Full", grouped=True)
+        datasets = pts.resolve_rgs_datasets(self.root, self.obsid, "Full")
         first = next(d for d in datasets if d.instrument == 1 and d.order == 1)
 
         self.assertEqual(first.spec, spec)
@@ -74,31 +74,22 @@ class PortToSpexResolverTests(unittest.TestCase):
         found = pts._find_interval_dir(self.root / self.obsid / "rgs", "LowFlux")
         self.assertEqual(found, d)
 
-    def test_default_pn_out_base_uses_grouped_subfolder(self):
-        grouped = pts._default_pn_out_base(self.root, self.obsid, "Persistent", grouped=True)
-        ungrouped = pts._default_pn_out_base(self.root, self.obsid, "Persistent", grouped=False)
+    def test_default_pn_out_base(self):
+        """Output goes to a flat spex/ directory (no grouped/ungrouped split)."""
+        out = pts._default_pn_out_base(self.root, self.obsid, "Persistent")
         self.assertEqual(
-            grouped,
-            self.root / self.obsid / "pn" / "spex" / "grouped" / "pn_Persistent_grp_spex",
-        )
-        self.assertEqual(
-            ungrouped,
-            self.root / self.obsid / "pn" / "spex" / "ungrouped" / "pn_Persistent_spex",
+            out,
+            self.root / self.obsid / "pn" / "spex" / "pn_Persistent_spex",
         )
 
-    def test_default_rgs_out_base_uses_grouped_subfolder(self):
-        grouped = pts._default_rgs_out_base(self.root, self.obsid, "Full", grouped=True)
-        ungrouped = pts._default_rgs_out_base(self.root, self.obsid, "Full", grouped=False)
+    def test_default_rgs_out_base(self):
+        """Output goes to a flat spex/ directory (no grouped/ungrouped split)."""
+        out = pts._default_rgs_out_base(self.root, self.obsid, "Full")
         self.assertEqual(
-            grouped,
-            self.root / self.obsid / "rgs" / "spex" / "grouped" / "rgs_Full_grp_spex",
-        )
-        self.assertEqual(
-            ungrouped,
-            self.root / self.obsid / "rgs" / "spex" / "ungrouped" / "rgs_Full_spex",
+            out,
+            self.root / self.obsid / "rgs" / "spex" / "rgs_Full_spex",
         )
 
 
 if __name__ == "__main__":
     unittest.main()
-

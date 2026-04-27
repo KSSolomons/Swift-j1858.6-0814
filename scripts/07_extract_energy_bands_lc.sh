@@ -13,7 +13,9 @@ SRC_RAWX_FILTER_STD="RAWX in [27:47]"
 BKG_RAWX_FILTER="RAWX in [1:3]"
 
 # Columns to remove from the full source region when making pile-up-excised products.
-SRC_EXCISION_FILTER="!(RAWX in [36:38])"
+# NOTE: Pile-up destruction fraction diagnostic (2026-04-27) confirmed
+# <1.5% destruction in the PSF core (RAWX 35-40). Excision is not needed.
+# SRC_EXCISION_FILTER="!(RAWX in [36:38])"  # DISABLED — no pile-up
 
 # Time binning for the output light curves (seconds).
 LC_BIN_SIZE="100"
@@ -63,7 +65,7 @@ fi
 mkdir -p "${LC_DIR}"
 
 FILTER_FULL="${SRC_RAWX_FILTER_STD}"
-FILTER_EXCISED="${SRC_RAWX_FILTER_STD} && ${SRC_EXCISION_FILTER}"
+# FILTER_EXCISED="${SRC_RAWX_FILTER_STD} && ${SRC_EXCISION_FILTER}"  # DISABLED — no pile-up
 
 extract_band_lc() {
     local band_name=$1
@@ -106,8 +108,8 @@ extract_band_lc() {
 band_names=(soft hard)
 band_pi_min=(500 2000)
 band_pi_max=(2000 10000)
-region_suffixes=(full excised)
-region_filters=("${FILTER_FULL}" "${FILTER_EXCISED}")
+region_suffixes=(full)
+region_filters=("${FILTER_FULL}")
 
 for region_index in "${!region_suffixes[@]}"; do
     suffix="${region_suffixes[region_index]}"

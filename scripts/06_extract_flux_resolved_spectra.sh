@@ -32,7 +32,9 @@ LC_BIN_SIZE=1.0
 # --- END CONFIGURATION ---
 
 # --- STANDARD CONFIGURATION ---
-IS_PILED_UP="yes"
+# NOTE: Pile-up destruction fraction diagnostic (2026-04-27) confirmed
+# <1.5% destruction in the PSF core (RAWX 35-40). No excision needed.
+IS_PILED_UP="no"
 SRC_RAWX_FILTER_STD="RAWX in [27:47]"
 BKG_RAWX_FILTER="RAWX in [3:5]"
 SRC_EXCISION_FILTER="!(RAWX in [36:38])"

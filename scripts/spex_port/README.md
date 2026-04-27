@@ -1,11 +1,14 @@
 # SPEX Port Helper
 
-This folder contains a lightweight conversion utility to speed up migration from XSPEC notebooks to SPEX-ready files.
+This folder contains a lightweight conversion utility that ports OGIP spectra
+(PN / RGS) into SPEX `.spo` / `.res` format using `pyspextools`.
 
 ## What it does
 
 - Resolves your existing PN/RGS OGIP products using this repo's naming conventions.
-- Converts them to SPEX `.spo` / `.res` via `pyspextools`.
+- Converts them to **ungrouped** SPEX `.spo` / `.res` files via `pyspextools`.
+- **Does not apply any grouping** — grouping is deferred to SPEX's native `obin`
+  command, which is applied during the fit workflow (see `scripts/spex_cli/`).
 - Writes a JSON manifest with all resolved inputs and outputs.
 - Supports `--dry-run` to validate paths before conversion.
 
@@ -18,21 +21,20 @@ This folder contains a lightweight conversion utility to speed up migration from
 Run from repo root:
 
 ```bash
-python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping --grouped --dry-run
-python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping --grouped --overwrite
+# Dry-run first to check resolved paths
+python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping --dry-run
+python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping --overwrite
 
-python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full --grouped --dry-run
-python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full --grouped --overwrite
+python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full --dry-run
+python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full --overwrite
 ```
 
 ## Output locations
 
 Defaults if `--out-base` is not provided:
 
-- PN grouped: `products/<obsid>/pn/spex/grouped/pn_<interval>_grp_spex.{spo,res}`
-- PN ungrouped: `products/<obsid>/pn/spex/ungrouped/pn_<interval>_spex.{spo,res}`
-- RGS grouped: `products/<obsid>/rgs/spex/grouped/rgs_<interval>_grp_spex.{spo,res}`
-- RGS ungrouped: `products/<obsid>/rgs/spex/ungrouped/rgs_<interval>_spex.{spo,res}`
+- PN: `products/<obsid>/pn/spex/pn_<interval>_spex.{spo,res}`
+- RGS: `products/<obsid>/rgs/spex/rgs_<interval>_spex.{spo,res}`
 
 A sidecar manifest is always written as:
 
@@ -45,6 +47,7 @@ A sidecar manifest is always written as:
   2. `products/<obsid>/rgs/flux_resolved/<interval>`
   3. `products/<obsid>/rgs/<interval>`
 - Conversion requires `pyspextools` in your active environment.
+- Grouping (`obin`) is **not** done here — use the SPEX CLI workflow for that.
 
 ## Tests
 
@@ -53,4 +56,3 @@ These tests only validate path resolution logic (they do not require SPEX libs):
 ```bash
 python -m unittest discover -s scripts/spex_port/tests -p 'test_*.py' -v
 ```
-

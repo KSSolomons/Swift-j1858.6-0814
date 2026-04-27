@@ -7,9 +7,9 @@ This script is intentionally conservative:
 - It writes a JSON manifest for reproducibility.
 
 Examples:
-    python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping --grouped --dry-run
-    python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping --grouped
-    python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full --grouped --dry-run
+    python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping --dry-run
+    python scripts/spex_port/port_to_spex.py pn --obsid 0865600201 --interval Dipping
+    python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full --dry-run
 """
 
 from __future__ import annotations
@@ -75,26 +75,23 @@ def _find_interval_dir(rgs_root: Path, interval: str) -> Path:
     )
 
 
-def resolve_pn_dataset(products_root: Path, obsid: str, interval: str, grouped: bool) -> PnDataset:
+def resolve_pn_dataset(products_root: Path, obsid: str, interval: str) -> PnDataset:
     pn_spec_dir = products_root / obsid / "pn" / "spec"
     flux_dir = pn_spec_dir / "flux_resolved"
 
     if interval == "Full":
-        grouped_spec_names = ["pn_source_spectrum_grp.pha", "pn_source_spectrum_grp.fits"]
-        ungrouped_spec_names = ["pn_source_spectrum.fits", "pn_source_spectrum.pha"]
+        spec_names = ["pn_source_spectrum.fits", "pn_source_spectrum.pha"]
         bkg_names = ["pn_bkg_spectrum.fits"]
         rmf_names = ["pn_rmf.rmf"]
         arf_names = ["pn_arf.arf"]
     else:
-        grouped_spec_names = [f"pn_source_{interval}_grp.pha", f"pn_source_{interval}_grp.fits"]
-        ungrouped_spec_names = [f"pn_source_{interval}.fits", f"pn_source_{interval}.pha"]
+        spec_names = [f"pn_source_{interval}.fits", f"pn_source_{interval}.pha"]
         bkg_names = [f"pn_bkg_{interval}.fits"]
         rmf_names = [f"pn_rmf_{interval}.rmf", "pn_rmf.rmf"]
         arf_names = [f"pn_arf_{interval}.arf", "pn_arf.arf"]
 
     spec_candidates: list[Path] = []
-    chosen_spec_names = grouped_spec_names if grouped else ungrouped_spec_names
-    for name in chosen_spec_names:
+    for name in spec_names:
         spec_candidates.extend([pn_spec_dir / name, flux_dir / name])
 
     bkg_candidates: list[Path] = []
@@ -124,15 +121,14 @@ def resolve_pn_dataset(products_root: Path, obsid: str, interval: str, grouped: 
 
     if missing:
         raise FileNotFoundError(
-            f"Missing PN files for interval={interval!r}, grouped={grouped}: {', '.join(missing)}"
+            f"Missing PN files for interval={interval!r}: {', '.join(missing)}"
         )
 
-    # Narrow Optional[Path] -> Path for static type checkers.
     assert spec is not None and bkg is not None and rmf is not None and arf is not None
     return PnDataset(spec=spec, bkg=bkg, rmf=rmf, arf=arf)
 
 
-def resolve_rgs_datasets(products_root: Path, obsid: str, interval: str, grouped: bool) -> list[RgsDataset]:
+def resolve_rgs_datasets(products_root: Path, obsid: str, interval: str) -> list[RgsDataset]:
     rgs_root = products_root / obsid / "rgs"
     interval_dir = _find_interval_dir(rgs_root, interval)
 
@@ -140,11 +136,7 @@ def resolve_rgs_datasets(products_root: Path, obsid: str, interval: str, grouped
     for inst in (1, 2):
         for order in (1, 2):
             prefix = f"rgs{inst}_src_o{order}_{interval}"
-            if grouped:
-                spec_names = [f"{prefix}_grp.pha", f"{prefix}_grp.fits"]
-            else:
-                spec_names = [f"{prefix}.fits", f"{prefix}.pha"]
-
+            spec_names = [f"{prefix}.fits", f"{prefix}.pha"]
             bkg_names = [f"rgs{inst}_bkg_o{order}_{interval}.fits"]
             rmf_names = [f"rgs{inst}_o{order}_{interval}.rmf"]
 
@@ -152,7 +144,6 @@ def resolve_rgs_datasets(products_root: Path, obsid: str, interval: str, grouped
             bkg = _first_name_match(interval_dir, bkg_names)
             rmf = _first_name_match(interval_dir, rmf_names)
 
-            # Keep going even if one pair is missing: users often have partial outputs.
             if spec is None or bkg is None or rmf is None:
                 continue
 
@@ -160,7 +151,7 @@ def resolve_rgs_datasets(products_root: Path, obsid: str, interval: str, grouped
 
     if not out:
         raise FileNotFoundError(
-            f"No complete RGS datasets found in {interval_dir} for interval={interval!r}, grouped={grouped}."
+            f"No complete RGS datasets found in {interval_dir} for interval={interval!r}."
         )
 
     return out
@@ -177,7 +168,7 @@ def _import_ogip_modules():
     return spio, ogip
 
 
-def convert_pn_to_spex(dataset: PnDataset, out_base: Path, overwrite: bool, keep_grouping: bool = False) -> tuple[Path, Path]:
+def convert_pn_to_spex(dataset: PnDataset, out_base: Path, overwrite: bool) -> tuple[Path, Path]:
     spio, ogip = _import_ogip_modules()
 
     oregion = ogip.OGIPRegion()
@@ -186,7 +177,7 @@ def convert_pn_to_spex(dataset: PnDataset, out_base: Path, overwrite: bool, keep
         rmffile=str(dataset.rmf),
         bkgfile=str(dataset.bkg),
         arffile=str(dataset.arf),
-        grouping=keep_grouping,
+        grouping=False,  # Always let SPEX perform grouping
     )
     oregion.ogip_to_spex()
 
@@ -200,7 +191,7 @@ def convert_pn_to_spex(dataset: PnDataset, out_base: Path, overwrite: bool, keep
 
 
 def convert_rgs_to_spex(
-    datasets: list[RgsDataset], out_base: Path, overwrite: bool, keep_grouping: bool = False
+    datasets: list[RgsDataset], out_base: Path, overwrite: bool
 ) -> tuple[Path, Path]:
     spio, ogip = _import_ogip_modules()
 
@@ -211,7 +202,7 @@ def convert_rgs_to_spex(
             phafile=str(d.spec),
             rmffile=str(d.rmf),
             bkgfile=str(d.bkg),
-            grouping=keep_grouping,
+            grouping=False,  # Always let SPEX perform grouping
         )
         oregion.ogip_to_spex()
         ds.append_region(oregion, 1, region_idx)
@@ -227,16 +218,12 @@ def write_manifest(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _default_pn_out_base(products_root: Path, obsid: str, interval: str, grouped: bool) -> Path:
-    suffix = f"{interval}_grp" if grouped else interval
-    group_dir = "grouped" if grouped else "ungrouped"
-    return products_root / obsid / "pn" / "spex" / group_dir / f"pn_{suffix}_spex"
+def _default_pn_out_base(products_root: Path, obsid: str, interval: str) -> Path:
+    return products_root / obsid / "pn" / "spex" / f"pn_{interval}_spex"
 
 
-def _default_rgs_out_base(products_root: Path, obsid: str, interval: str, grouped: bool) -> Path:
-    suffix = f"{interval}_grp" if grouped else interval
-    group_dir = "grouped" if grouped else "ungrouped"
-    return products_root / obsid / "rgs" / "spex" / group_dir / f"rgs_{suffix}_spex"
+def _default_rgs_out_base(products_root: Path, obsid: str, interval: str) -> Path:
+    return products_root / obsid / "rgs" / "spex" / f"rgs_{interval}_spex"
 
 
 def _pn_command(args: argparse.Namespace) -> int:
@@ -244,17 +231,16 @@ def _pn_command(args: argparse.Namespace) -> int:
     out_base = (
         Path(args.out_base).expanduser().resolve()
         if args.out_base
-        else _default_pn_out_base(products_root, args.obsid, args.interval, args.grouped)
+        else _default_pn_out_base(products_root, args.obsid, args.interval)
     )
 
-    dataset = resolve_pn_dataset(products_root, args.obsid, args.interval, args.grouped)
+    dataset = resolve_pn_dataset(products_root, args.obsid, args.interval)
 
     manifest = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "instrument": "pn",
         "obsid": args.obsid,
         "interval": args.interval,
-        "grouped": args.grouped,
         "dry_run": args.dry_run,
         "dataset": {
             "spec": str(dataset.spec),
@@ -274,7 +260,6 @@ def _pn_command(args: argparse.Namespace) -> int:
         dataset,
         out_base,
         overwrite=args.overwrite,
-        keep_grouping=args.grouped,
     )
     manifest["outputs"] = {"spo": str(spo_path), "res": str(res_path)}
 
@@ -290,17 +275,16 @@ def _rgs_command(args: argparse.Namespace) -> int:
     out_base = (
         Path(args.out_base).expanduser().resolve()
         if args.out_base
-        else _default_rgs_out_base(products_root, args.obsid, args.interval, args.grouped)
+        else _default_rgs_out_base(products_root, args.obsid, args.interval)
     )
 
-    datasets = resolve_rgs_datasets(products_root, args.obsid, args.interval, args.grouped)
+    datasets = resolve_rgs_datasets(products_root, args.obsid, args.interval)
 
     manifest = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "instrument": "rgs",
         "obsid": args.obsid,
         "interval": args.interval,
-        "grouped": args.grouped,
         "dry_run": args.dry_run,
         "datasets": [
             {
@@ -324,7 +308,6 @@ def _rgs_command(args: argparse.Namespace) -> int:
         datasets,
         out_base,
         overwrite=args.overwrite,
-        keep_grouping=args.grouped,
     )
     manifest["outputs"] = {"spo": str(spo_path), "res": str(res_path)}
 
@@ -340,21 +323,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = p.add_subparsers(dest="instrument", required=True)
 
-    pn = sub.add_parser("pn", help="Convert one PN interval to SPEX")
+    pn = sub.add_parser("pn", help="Convert one PN interval to SPEX (grouping is always performed by SPEX)")
     pn.add_argument("--products-root", default="products", help="Path to products root (default: products)")
     pn.add_argument("--obsid", required=True)
     pn.add_argument("--interval", required=True, help="Examples: Full, Dipping, Persistent, Shallow, Dipping_HighFlux")
-    pn.add_argument("--grouped", action="store_true")
     pn.add_argument("--out-base", help="Output base path without extension ('.spo' and '.res' added)")
     pn.add_argument("--dry-run", action="store_true", help="Resolve and print paths without conversion")
     pn.add_argument("--overwrite", action="store_true")
     pn.set_defaults(func=_pn_command)
 
-    rgs = sub.add_parser("rgs", help="Convert one RGS interval to SPEX")
+    rgs = sub.add_parser("rgs", help="Convert one RGS interval to SPEX (grouping is always performed by SPEX)")
     rgs.add_argument("--products-root", default="products", help="Path to products root (default: products)")
     rgs.add_argument("--obsid", required=True)
     rgs.add_argument("--interval", required=True, help="Examples: Full, Persistent, Dipping, Shallow, LowFlux, HighFlux")
-    rgs.add_argument("--grouped", action="store_true")
     rgs.add_argument("--out-base", help="Output base path without extension ('.spo' and '.res' added)")
     rgs.add_argument("--dry-run", action="store_true", help="Resolve and print paths without conversion")
     rgs.add_argument("--overwrite", action="store_true")

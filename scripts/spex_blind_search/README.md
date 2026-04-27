@@ -1,6 +1,9 @@
 # SPEX Blind Line Search
 
-Standalone SPEX blind-search helper for the PN/SPEX workflow.
+Standalone SPEX blind-search helper for the legacy notebook workflow.
+
+The new CLI-only workflow lives in `scripts/spex_cli/` and does not depend on
+any notebook-era SPEX bindings.
 
 ## Canonical module
 

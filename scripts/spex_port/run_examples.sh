@@ -10,14 +10,11 @@ cd "$ROOT"
 python scripts/spex_port/port_to_spex.py pn \
   --obsid 0865600201 \
   --interval Dipping \
-  --grouped \
   --dry-run
 
 python scripts/spex_port/port_to_spex.py rgs \
   --obsid 0865600201 \
   --interval Full \
-  --grouped \
   --dry-run
 
 echo "Dry-run checks completed. Remove --dry-run for real conversion."
-
