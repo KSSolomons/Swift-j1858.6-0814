@@ -26,75 +26,36 @@
 #
 ################################################################################
 
+# --- Source shared setup ---
+source "$(dirname "$0")/sas_common.sh"
+
 # --- USER CONFIGURATION - EDIT THIS SECTION ---
 
-# Set the RAWX filter for your FULL SOURCE
-# Example: "RAWX in [30:45]"
-SRC_RAWX_FILTER="RAWX in [27:47]"
+# Override source/background regions for pile-up checking if needed
+# (defaults come from sas_common.sh)
+SRC_RAWX_FILTER="${SRC_RAWX_FILTER_STD}"
+# BKG_RAWX_FILTER is inherited from sas_common.sh
 
-# Set the RAWX filter for your BACKGROUND
-# Example: "RAWX in [3:5]"
-BKG_RAWX_FILTER="RAWX in [1:3]"
+# --- epatplot Energy Range (in eV) ---
+# Default: 0.5-10 keV. Adjust to focus on a specific band.
+# Examples: soft band (500-2000), hard band (2000-10000)
+EPAT_PIMIN=500
+EPAT_PIMAX=2000
 
 # --- Pile-up Excision Test ---
 # Set this to "yes" to run the test
 RUN_EXCISION_TEST="yes"
 
-# Set the filter for the central columns you want to REMOVE
-SRC_EXCISION_FILTER="!(RAWX in [36:38])" # Example: excise RAWX=37 only
-
 # --- END OF CONFIGURATION ---
-
-# --- 1. CHECK FOR ENVIRONMENT VARIABLES & SET PATHS ---
-if [ -z "${PROJECT_ROOT}" ]; then
-    echo "ERROR: Environment variable PROJECT_ROOT is not set."
-    echo "Please set this to the full path of your project directory."
-    echo "Example: export PROJECT_ROOT=/path/to/my_analysis"
-    exit 1
-fi
-
-if [ -z "${OBSID}" ]; then
-    echo "ERROR: Environment variable OBSID is not set."
-    echo "Example: export OBSID=0123456789"
-    exit 1
-fi
-
-# Define the ODF directory path from the root and ObsID
-export OBS_DIR_ODF="${PROJECT_ROOT}/data/${OBSID}"
-if [ ! -d "${OBS_DIR_ODF}" ]; then
-    echo "ERROR: ODF directory not found: ${OBS_DIR_ODF}"
-    exit 1
-fi
-echo "Using ODF from: ${OBS_DIR_ODF}"
-
-# --- Re-establish SAS Setup Variables ---
-ODF_DIR_CLEAN=$(echo "${OBS_DIR_ODF}" | sed 's:/*$::') # Clean path to data dir
-CCF_FILE="${ODF_DIR_CLEAN}/ccf.cif"
-SUMMARY_FILE_NAME=$(find "${ODF_DIR_CLEAN}" -maxdepth 1 -name "*SUM.SAS" -printf "%f\n" | head -n 1)
-if [ -z "${SUMMARY_FILE_NAME}" ]; then
-    echo "ERROR: Cannot find *SUM.SAS file in ${ODF_DIR_CLEAN}"
-    echo "Please ensure script 01 ran successfully."
-    exit 1
-fi
-SUMMARY_FILE="${ODF_DIR_CLEAN}/${SUMMARY_FILE_NAME}"
-if [ ! -f "${CCF_FILE}" ]; then echo "ERROR: Cannot find CCF file: ${CCF_FILE}"; exit 1; fi
-if [ ! -f "${SUMMARY_FILE}" ]; then echo "ERROR: Cannot find Summary file: ${SUMMARY_FILE}"; exit 1; fi
-export SAS_CCF="${CCF_FILE}"
-export SAS_ODF="${SUMMARY_FILE}"
-echo "SAS_CCF re-established: $(basename "${SAS_CCF}")"
-echo "SAS_ODF re-established: $(basename "${SAS_ODF}")"
 
 # Set strict error checking
 set -e
 
 echo "--- Starting Pile-up Check (epatplot) for TIMING MODE ---"
-export PROC_DIR="${PROJECT_ROOT}" # Use PROJECT_ROOT, not pwd
 echo "Using ObsID: ${OBSID}"
 
 # --- Define Directories ---
-# These paths are now robust and absolute
-export PN_DIR="${PROJECT_ROOT}/products/${OBSID}/pn"
-export PU_DIR="${PROJECT_ROOT}/products/${OBSID}/pn/pile_up"
+export PU_DIR="${PN_DIR}/pile_up"
 echo "Looking for input/output files in: ${PN_DIR}"
 echo "Placing plots in: ${PU_DIR}"
 
@@ -103,7 +64,6 @@ echo "Creating plot directory: ${PU_DIR}"
 mkdir -p "${PU_DIR}"
 
 # --- 2. Define filenames ---
-CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 IMAGE_FILE="${PN_DIR}/pn_rawx_rawy_image.fits" # For inspection
 BKG_EVT_TEMP="${PN_DIR}/pn_bkg_temp.evt"
 
@@ -157,6 +117,7 @@ epatplot set="${SRC_EVT_FULL_TEMP}" \
     useplotfile=yes \
     withbackgroundset=yes \
     backgroundset="${BKG_EVT_TEMP}" \
+    pileupnumberenergyrange="${EPAT_PIMIN} ${EPAT_PIMAX}" \
     </dev/null # Added non-interactive flag
 
 # Convert PDF to JPG
@@ -186,6 +147,7 @@ if [ "${RUN_EXCISION_TEST}" == "yes" ]; then
         useplotfile=yes \
         withbackgroundset=yes \
         backgroundset="${BKG_EVT_TEMP}" \
+        pileupnumberenergyrange="${EPAT_PIMIN} ${EPAT_PIMAX}" \
         </dev/null # Added non-interactive flag
     
     # Convert PDF to JPG
@@ -204,7 +166,7 @@ if [ "${RUN_EXCISION_TEST}" == "yes" ]; then
 fi
 
 echo "Returning to project root directory..."
-cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
+cd "${PROJECT_ROOT}" || { echo "Failed to cd back to ${PROJECT_ROOT}"; exit 1; }
 
 # --- 8. Instruct ---
 echo ""

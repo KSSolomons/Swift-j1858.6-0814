@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# SCRIPT: 02_filter_background.sh
+# SCRIPT: 02_filter_high_background.sh
 #
 # DESCRIPTION:
 # Creates a high-energy background lightcurve for a specific ObsID.
@@ -40,55 +40,13 @@ RATE_THRESHOLD="0.3"
 
 # --- END OF CONFIGURATION ---
 
-# --- 1. CHECK FOR ENVIRONMENT VARIABLES & SET PATHS ---
-if [ -z "${PROJECT_ROOT}" ]; then
-    echo "ERROR: Environment variable PROJECT_ROOT is not set."
-    echo "Please set this to the full path of your project directory."
-    echo "Example: export PROJECT_ROOT=/path/to/my_analysis"
-    exit 1
-fi
-
-if [ -z "${OBSID}" ]; then
-    echo "ERROR: Environment variable OBSID is not set."
-    echo "Example: export OBSID=0123456789"
-    exit 1
-fi
-
-# Define the ODF directory path from the root and ObsID
-export OBS_DIR_ODF="${PROJECT_ROOT}/data/${OBSID}"
-if [ ! -d "${OBS_DIR_ODF}" ]; then
-    echo "ERROR: ODF directory not found: ${OBS_DIR_ODF}"
-    exit 1
-fi
-echo "Using ODF from: ${OBS_DIR_ODF}"
-
-# --- Re-establish SAS Setup Variables ---
-ODF_DIR_CLEAN=$(echo "${OBS_DIR_ODF}" | sed 's:/*$::') # Clean path to data dir
-CCF_FILE="${ODF_DIR_CLEAN}/ccf.cif"
-SUMMARY_FILE_NAME=$(find "${ODF_DIR_CLEAN}" -maxdepth 1 -name "*SUM.SAS" -printf "%f\n" | head -n 1)
-if [ -z "${SUMMARY_FILE_NAME}" ]; then
-    echo "ERROR: Cannot find *SUM.SAS file in ${ODF_DIR_CLEAN}"
-    echo "Please ensure script 01 ran successfully."
-    exit 1
-fi
-SUMMARY_FILE="${ODF_DIR_CLEAN}/${SUMMARY_FILE_NAME}"
-if [ ! -f "${CCF_FILE}" ]; then echo "ERROR: Cannot find CCF file: ${CCF_FILE}"; exit 1; fi
-if [ ! -f "${SUMMARY_FILE}" ]; then echo "ERROR: Cannot find Summary file: ${SUMMARY_FILE}"; exit 1; fi
-export SAS_CCF="${CCF_FILE}"
-export SAS_ODF="${SUMMARY_FILE}"
-echo "SAS_CCF re-established: $(basename "${SAS_CCF}")"
-echo "SAS_ODF re-established: $(basename "${SAS_ODF}")"
+# --- Source shared setup ---
+source "$(dirname "$0")/sas_common.sh"
 
 # Set strict error checking
 set -e
 
 echo "--- Starting Background Flare Filtering ---"
-# Set the root directory variable for cd commands
-export PROC_DIR="${PROJECT_ROOT}"
-
-# --- Define Directories ---
-# This path is now robust and absolute
-export PN_DIR="${PROJECT_ROOT}/products/${OBSID}/pn"
 echo "Looking for input/output files in: ${PN_DIR}"
 
 # --- 1. Find the input EPIC-pn event file ---
@@ -107,7 +65,6 @@ echo "Found event file: ${PN_EVT_FILE}"
 BKG_LC="${PN_DIR}/pn_bkg_lc.fits"
 BKG_LC_PLOT="${PN_DIR}/pn_bkg_lc.jpg"
 GTI_FILE="${PN_DIR}/gti_bkg.fits"
-CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 
 # Define filter expressions
 BKG_EXPR="#XMMEA_EP && (PI in [10000:12000]) && (PATTERN==0)"
@@ -137,7 +94,7 @@ rm -f "pn_bkg_lc.ps" # Clean up postscript file
 
 # Return to the root directory
 echo "Plots created. Returning to root directory..."
-cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
+cd "${PROJECT_ROOT}" || { echo "Failed to cd back to ${PROJECT_ROOT}"; exit 1; }
 
 echo ""
 echo "Plots created in ${PN_DIR}. Please inspect background lightcurve: ${BKG_LC_PLOT}"

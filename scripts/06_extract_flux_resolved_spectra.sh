@@ -15,10 +15,12 @@
 #
 ################################################################################
 
+# --- Source shared setup (env checks, SAS, paths, instrument config) ---
+source "$(dirname "$0")/sas_common.sh"
+
 # --- CONFIGURATION: EDIT THIS SECTION ---
 
 # 1. Define the Time Interval for the "Dipping Region"
-
 DIP_TIME_FILTER="(TIME IN [701596278.492053:701625198.492053])"
 
 # 2. Define the Single Flux Threshold (Counts/Second)
@@ -29,39 +31,17 @@ FLUX_THRESHOLD=4.3849687576293945
 # We use 1.0s to capture rapid changes in flux.
 LC_BIN_SIZE=1.0
 
-# --- END CONFIGURATION ---
-
-# --- STANDARD CONFIGURATION ---
-# NOTE: Pile-up destruction fraction diagnostic (2026-04-27) confirmed
-# <1.5% destruction in the PSF core (RAWX 35-40). No excision needed.
-IS_PILED_UP="no"
-SRC_RAWX_FILTER_STD="RAWX in [27:47]"
-BKG_RAWX_FILTER="RAWX in [3:5]"
-SRC_EXCISION_FILTER="!(RAWX in [36:38])"
+# 4. Grouping specification (minimum counts per bin)
 GROUPING_SPEC="10"
 
-# --- CHECK ENV VARS ---
-if [ -z "${PROJECT_ROOT}" ] || [ -z "${OBSID}" ]; then
-    echo "ERROR: Environment variables PROJECT_ROOT or OBSID are not set."
-    exit 1
-fi
-
-# Define paths
-export PN_DIR="${PROJECT_ROOT}/products/${OBSID}/pn"
-export SPEC_DIR="${PROJECT_ROOT}/products/${OBSID}/pn/spec"
-export FLUX_RES_DIR="${SPEC_DIR}/flux_resolved" # Dedicated folder
-
-mkdir -p "${FLUX_RES_DIR}"
-
-CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
-if [ ! -f "${CLEAN_EVT_FILE}" ]; then echo "ERROR: clean event file not found."; exit 1; fi
-
-# Re-establish SAS 
-ODF_DIR_CLEAN="${PROJECT_ROOT}/data/${OBSID}"
-export SAS_CCF="${ODF_DIR_CLEAN}/ccf.cif"
-export SAS_ODF=$(find "${ODF_DIR_CLEAN}" -maxdepth 1 -name "*SUM.SAS" | head -n 1)
+# --- END CONFIGURATION ---
 
 set -e
+
+export FLUX_RES_DIR="${SPEC_DIR}/flux_resolved"
+mkdir -p "${FLUX_RES_DIR}"
+
+if [ ! -f "${CLEAN_EVT_FILE}" ]; then echo "ERROR: clean event file not found."; exit 1; fi
 
 echo "--- Starting Flux-Resolved Extraction (2 Bins) ---"
 
@@ -139,26 +119,15 @@ for (( i=0; i<${#FILTER_EXPRESSIONS[@]}; i++ )); do
     fi
     
     # --- B. Define Spectral Filters ---
-    # Now we apply that GTI to the Event File
     GTI_FILTER="gti(${TEMP_GTI}, TIME)"
     BASE_FILTER="(FLAG==0) && (PI in [500:15000]) && (PATTERN<=4)"
+
+    SRC_FILTER=$(build_src_filter "${BASE_FILTER}" "${GTI_FILTER}")
     BKG_FILTER="${BASE_FILTER} && ${BKG_RAWX_FILTER} && ${GTI_FILTER}"
 
-    # Apply pile-up excision for the SPECTRUM (but not the rate calculation)
-    if [ "${IS_PILED_UP}" == "yes" ]; then
-        SRC_FILTER="${BASE_FILTER} && ${SRC_RAWX_FILTER_STD} && ${SRC_EXCISION_FILTER} && ${GTI_FILTER}"
-    else
-        SRC_FILTER="${BASE_FILTER} && ${SRC_RAWX_FILTER_STD} && ${GTI_FILTER}"
-    fi
-
     # --- C. Extract Spectra ---
-    evselect table="${CLEAN_EVT_FILE}" withspectrumset=yes spectrumset="${SRC_SPEC}" \
-        energycolumn=PI spectralbinsize=5 withspecranges=yes specchannelmin=0 specchannelmax=20479 \
-        expression="${SRC_FILTER}" writedss=yes
-
-    evselect table="${CLEAN_EVT_FILE}" withspectrumset=yes spectrumset="${BKG_SPEC}" \
-        energycolumn=PI spectralbinsize=5 withspecranges=yes specchannelmin=0 specchannelmax=20479 \
-        expression="${BKG_FILTER}" writedss=yes
+    extract_spectrum "${SRC_SPEC}" "${SRC_FILTER}"
+    extract_spectrum "${BKG_SPEC}" "${BKG_FILTER}"
 
     # --- D. Response Gen & Backscale ---
     backscale spectrumset="${SRC_SPEC}" badpixlocation="${CLEAN_EVT_FILE}"
@@ -166,33 +135,8 @@ for (( i=0; i<${#FILTER_EXPRESSIONS[@]}; i++ )); do
     
     rmfgen spectrumset="${SRC_SPEC}" rmfset="${RMF_FILE}"
 
-    # ARF Generation (Pile-up logic)
-    if [ "${IS_PILED_UP}" == "yes" ]; then
-        # Temp filenames
-        SPEC_FULL="${FLUX_RES_DIR}/temp_full.fits"
-        SPEC_INN="${FLUX_RES_DIR}/temp_inn.fits"
-        ARF_FULL="${FLUX_RES_DIR}/temp_full.arf"
-        ARF_INN="${FLUX_RES_DIR}/temp_inn.arf"
-        
-        # Temp Filters (Must include GTI)
-        INNER_CORE_RAWX=$(echo "${SRC_EXCISION_FILTER}" | sed -e 's/!//' -e 's/(//' -e 's/)//')
-        FILT_FULL="${BASE_FILTER} && ${SRC_RAWX_FILTER_STD} && ${GTI_FILTER}"
-        FILT_INN="${BASE_FILTER} && ${INNER_CORE_RAWX} && ${GTI_FILTER}"
-
-        # Extract Temp Spectra
-        evselect table="${CLEAN_EVT_FILE}" withspectrumset=yes spectrumset="${SPEC_FULL}" expression="${FILT_FULL}" energycolumn=PI spectralbinsize=5 withspecranges=yes specchannelmin=0 specchannelmax=20479
-        evselect table="${CLEAN_EVT_FILE}" withspectrumset=yes spectrumset="${SPEC_INN}" expression="${FILT_INN}" energycolumn=PI spectralbinsize=5 withspecranges=yes specchannelmin=0 specchannelmax=20479
-        
-        # Gen Temp ARFs
-        arfgen spectrumset="${SPEC_FULL}" arfset="${ARF_FULL}" withrmfset=yes rmfset="${RMF_FILE}" badpixlocation="${CLEAN_EVT_FILE}" detmaptype=psf
-        arfgen spectrumset="${SPEC_INN}" arfset="${ARF_INN}" withrmfset=yes rmfset="${RMF_FILE}" badpixlocation="${CLEAN_EVT_FILE}" detmaptype=psf
-
-        # Subtract and Clean
-        addarf "${ARF_FULL} ${ARF_INN}" "1.0 -1.0" "${ARF_FILE}" clobber=yes
-        rm "${SPEC_FULL}" "${SPEC_INN}" "${ARF_FULL}" "${ARF_INN}"
-    else
-        arfgen spectrumset="${SRC_SPEC}" arfset="${ARF_FILE}" withrmfset=yes rmfset="${RMF_FILE}" badpixlocation="${CLEAN_EVT_FILE}" detmaptype=psf
-    fi
+    # ARF Generation
+    generate_arf "${SRC_SPEC}" "${ARF_FILE}" "${RMF_FILE}" "${BASE_FILTER}" "${GTI_FILTER}"
 
     # --- E. Grouping ---
     specgroup spectrumset="${SRC_SPEC}" groupedset="${GRP_FILE}" \

@@ -27,23 +27,10 @@
 #
 ################################################################################
 
-# --- USER CONFIGURATION - EDIT THIS SECTION ---
+# --- Source shared setup (env checks, SAS, paths, instrument config) ---
+source "$(dirname "$0")/sas_common.sh"
 
-# Set to "yes" if epatplot showed pile-up, otherwise "no".
-# NOTE: Pile-up destruction fraction diagnostic (2026-04-27) confirmed
-# <1.5% destruction in the PSF core (RAWX 35-40). No excision needed.
-IS_PILED_UP="no"
-
-# The standard (FULL) source region.
-SRC_RAWX_FILTER_STD="RAWX in [27:47]"
-
-# The BACKGROUND region (used always)
-BKG_RAWX_FILTER="RAWX in [1:3]"
-
-# --- Only needed if IS_PILED_UP="yes" ---
-# The PILE-UP EXCISION filter (the columns to REMOVE from SRC_RAWX_FILTER_STD)
-SRC_EXCISION_FILTER="!(RAWX in [36:38])"
-# --- End Pile-up Specific ---
+# --- SCRIPT-SPECIFIC CONFIGURATION ---
 
 # The grouping specification for the final spectrum
 GROUPING_SPEC="20"
@@ -53,40 +40,6 @@ LC_BIN_SIZE="100"
 
 # --- END OF CONFIGURATION ---
 
-# --- 1. CHECK FOR ENVIRONMENT VARIABLES & SET PATHS ---
-if [ -z "${PROJECT_ROOT}" ]; then
-    echo "ERROR: Environment variable PROJECT_ROOT is not set."
-    exit 1
-fi
-if [ -z "${OBSID}" ]; then
-    echo "ERROR: Environment variable OBSID is not set."
-    exit 1
-fi
-export OBS_DIR_ODF="${PROJECT_ROOT}/data/${OBSID}"
-if [ ! -d "${OBS_DIR_ODF}" ]; then
-    echo "ERROR: ODF directory not found: ${OBS_DIR_ODF}"
-    exit 1
-fi
-echo "Using ODF from: ${OBS_DIR_ODF}"
-
-# --- Re-establish SAS Setup Variables ---
-ODF_DIR_CLEAN=$(echo "${OBS_DIR_ODF}" | sed 's:/*$::')
-CCF_FILE="${ODF_DIR_CLEAN}/ccf.cif"
-SUMMARY_FILE_NAME=$(find "${ODF_DIR_CLEAN}" -maxdepth 1 -name "*SUM.SAS" -printf "%f\n" | head -n 1)
-if [ -z "${SUMMARY_FILE_NAME}" ]; then
-    echo "ERROR: Cannot find *SUM.SAS file in ${ODF_DIR_CLEAN}"
-    exit 1
-fi
-SUMMARY_FILE="${ODF_DIR_CLEAN}/${SUMMARY_FILE_NAME}"
-if [ ! -f "${CCF_FILE}" ]; then echo "ERROR: Cannot find CCF file: ${CCF_FILE}"; exit 1; fi
-if [ ! -f "${SUMMARY_FILE}" ]; then echo "ERROR: Cannot find Summary file: ${SUMMARY_FILE}"; exit 1; fi
-
-export SAS_CCF="${CCF_FILE}"
-export SAS_ODF="${SUMMARY_FILE}"
-echo "SAS_CCF re-established: $(basename "${SAS_CCF}")"
-echo "SAS_ODF re-established: $(basename "${SAS_ODF}")"
-# --- End Re-establish ---
-
 set -e
 echo "--- Starting Spectral and Lightcurve Extraction ---"
 if [ "${IS_PILED_UP}" == "yes" ]; then
@@ -94,13 +47,7 @@ if [ "${IS_PILED_UP}" == "yes" ]; then
 else
     echo "*** STANDARD EXTRACTION (NO PILE-UP) ***"
 fi
-export PROC_DIR="${PROJECT_ROOT}"
 echo "Using ObsID: ${OBSID}"
-
-# --- Define Directories ---
-export PN_DIR="${PROJECT_ROOT}/products/${OBSID}/pn"
-export SPEC_DIR="${PROJECT_ROOT}/products/${OBSID}/pn/spec"
-export LC_DIR="${PROJECT_ROOT}/products/${OBSID}/pn/lc"
 echo "Input file from: ${PN_DIR}"
 echo "Spectral products to: ${SPEC_DIR}"
 echo "Lightcurve products to: ${LC_DIR}"
@@ -110,7 +57,6 @@ mkdir -p "${SPEC_DIR}"
 mkdir -p "${LC_DIR}"
 
 # --- 2. Define filenames ---
-CLEAN_EVT_FILE="${PN_DIR}/pn_clean.evt"
 BACKUP_EVT_FILE="${PN_DIR}/no_barycorr_pn_clean.fits"
 
 SRC_SPEC="${SPEC_DIR}/pn_source_spectrum.fits"
@@ -121,30 +67,22 @@ BKG_SPEC="${SPEC_DIR}/pn_bkg_spectrum.fits"
 SRC_LC_RAW_FILE="${LC_DIR}/pn_source_lc_raw.fits"
 BKG_LC_RAW_FILE="${LC_DIR}/pn_bkg_lc_raw.fits"
 CORR_LC_FILE="${LC_DIR}/pn_source_lc_corrected.fits"
-# (Temp files...)
-SRC_SPEC_FULL_TEMP="${PN_DIR}/pn_source_spectrum_full_temp.fits"
-SRC_SPEC_INNER_TEMP="${PN_DIR}/pn_source_spectrum_inner_temp.fits"
-ARF_FILE_FULL_TEMP="${PN_DIR}/pn_arf_full_temp.arf"
-ARF_FILE_INNER_TEMP="${PN_DIR}/pn_arf_inner_temp.arf"
 
 # --- 2b. Apply Barycentric Correction ---
 echo "--- 2b. Applying Barycentric Correction (in-place) ---"
 
-# *** NEW ***: Store current directory and cd into pn dir
 echo "Changing to ${PN_DIR} to run barycen..."
 START_DIR=$(pwd)
 cd "${PN_DIR}" || { echo "Failed to cd to ${PN_DIR}"; exit 1; }
 
-# Define local filenames for barycen
 CLEAN_EVT_FILENAME=$(basename "${CLEAN_EVT_FILE}")
 BACKUP_EVT_FILENAME=$(basename "${BACKUP_EVT_FILE}")
 echo $CLEAN_EVT_FILENAME
 # Check if the backup file (the *original*) already exists.
 if [ ! -f "${BACKUP_EVT_FILENAME}" ]; then
-    # If it doesn't exist, this is the first run.
     if [ ! -f "${CLEAN_EVT_FILENAME}" ]; then
         echo "ERROR: Original file ${CLEAN_EVT_FILENAME} not found. Cannot create backup."
-        cd "${START_DIR}" # Go back before exiting
+        cd "${START_DIR}"
         exit 1
     fi
     
@@ -155,7 +93,6 @@ if [ ! -f "${BACKUP_EVT_FILENAME}" ]; then
     echo "Running barycen (in-place) on ${CLEAN_EVT_FILENAME}:EVENTS..."
     barycen table="${CLEAN_EVT_FILENAME}:EVENTS"
 else
-    # If the backup *does* exist, this is a re-run.
     echo "Backup ${BACKUP_EVT_FILENAME} found."
     echo "Restoring ${CLEAN_EVT_FILENAME} from backup to ensure fresh correction."
     cp "${BACKUP_EVT_FILENAME}" "${CLEAN_EVT_FILENAME}"
@@ -166,7 +103,6 @@ fi
 
 echo "Barycen complete. ${CLEAN_EVT_FILENAME} is now barycentered."
 
-# *** NEW ***: Return to original directory
 echo "Returning to ${START_DIR}..."
 cd "${START_DIR}"
 # --- End of Barycen Section ---
@@ -179,17 +115,14 @@ else
     FINAL_SRC_RAWX_FILTER="${SRC_RAWX_FILTER_STD}"
     echo "Using STANDARD spatial filter: ${FINAL_SRC_RAWX_FILTER}"
 fi
-# This check now verifies the *barycentered* file exists.
+
 if [ ! -f "${CLEAN_EVT_FILE}" ]; then
     echo "ERROR: Could not find ${CLEAN_EVT_FILE}"
     exit 1
 fi
 
 # --- 3b. Extract Raw Lightcurves ---
-# Use the user-requested energy range for LCs
-# *** RESTORED PI FILTER AS REQUESTED ***
 LC_BASE_FILTER_EXPR="(FLAG==0)&&(PATTERN<=4)&&(PI in [500:10000])"
-# Use the standard full region for the lightcurve, no pile-up excision needed
 FINAL_SRC_LC_FILTER_EXPR="${LC_BASE_FILTER_EXPR} && ${SRC_RAWX_FILTER_STD}"
 FINAL_BKG_LC_FILTER_EXPR="${LC_BASE_FILTER_EXPR} && ${BKG_RAWX_FILTER}"
 
@@ -208,7 +141,6 @@ evselect table="${CLEAN_EVT_FILE}" \
     expression="${FINAL_BKG_LC_FILTER_EXPR}"
 
 # --- 3c. Run epiclccorr ---
-
 echo "Running epiclccorr to create corrected lightcurve: ${CORR_LC_FILE}"
 epiclccorr srctslist="${SRC_LC_RAW_FILE}" \
     eventlist="${CLEAN_EVT_FILE}" \
@@ -218,28 +150,16 @@ epiclccorr srctslist="${SRC_LC_RAW_FILE}" \
     applyabsolutecorrections=yes
 
 # --- 4. Extract Source Spectrum ---
-# Use the standard spectral energy range
-# *** RESTORED PI range as requested ***
 SPECTRAL_BASE_FILTER_EXPR="(FLAG==0)&&(PI in [200:15000])&&(PATTERN<=4)"
 FINAL_SRC_SPEC_FILTER_EXPR="${SPECTRAL_BASE_FILTER_EXPR} && ${FINAL_SRC_RAWX_FILTER}"
 
 echo "Extracting source spectrum: ${SRC_SPEC}"
-evselect table="${CLEAN_EVT_FILE}" \
-    withspectrumset=yes spectrumset="${SRC_SPEC}" \
-    energycolumn=PI spectralbinsize=5 \
-    withspecranges=yes specchannelmin=0 specchannelmax=20479 \
-    expression="${FINAL_SRC_SPEC_FILTER_EXPR}" \
-    writedss=yes
+extract_spectrum "${SRC_SPEC}" "${FINAL_SRC_SPEC_FILTER_EXPR}"
 
 # --- 5. Extract Background Spectrum ---
 echo "Extracting background spectrum: ${BKG_SPEC}"
 BKG_FILTER_EXPR="${SPECTRAL_BASE_FILTER_EXPR} && ${BKG_RAWX_FILTER}"
-evselect table="${CLEAN_EVT_FILE}" \
-    withspectrumset=yes spectrumset="${BKG_SPEC}" \
-    energycolumn=PI spectralbinsize=5 \
-    withspecranges=yes specchannelmin=0 specchannelmax=20479 \
-    expression="${BKG_FILTER_EXPR}" \
-    writedss=yes
+extract_spectrum "${BKG_SPEC}" "${BKG_FILTER_EXPR}"
 
 # --- 6. Calculate BACKSCAL Keywords ---
 echo "Calculating BACKSCAL for source spectrum..."
@@ -252,48 +172,7 @@ echo "Generating RMF: ${RMF_FILE}"
 rmfgen spectrumset="${SRC_SPEC}" rmfset="${RMF_FILE}"
 
 # --- 8. Generate ARF (Conditional Method) ---
-if [ "${IS_PILED_UP}" == "yes" ]; then
-    echo "--- Generating ARF via subtraction method (for pile-up) ---"
-    INNER_CORE_RAWX=$(echo "${SRC_EXCISION_FILTER}" | sed -e 's/!//' -e 's/(//' -e 's/)//')
-    INNER_CORE_FILTER_EXPR="${SPECTRAL_BASE_FILTER_EXPR} && ${INNER_CORE_RAWX}"
-    FULL_SRC_FILTER_EXPR_TEMP="${SPECTRAL_BASE_FILTER_EXPR} && ${SRC_RAWX_FILTER_STD}"
-
-    echo "  Extracting FULL source spectrum (temp)..."
-    evselect table="${CLEAN_EVT_FILE}" \
-        withspectrumset=yes spectrumset="${SRC_SPEC_FULL_TEMP}" \
-        expression="${FULL_SRC_FILTER_EXPR_TEMP}" \
-        energycolumn=PI spectralbinsize=5 \
-        withspecranges=yes specchannelmin=0 specchannelmax=20479 \
-        writedss=yes
-
-    echo "  Extracting INNER CORE spectrum (temp)..."
-    evselect table="${CLEAN_EVT_FILE}" \
-        withspectrumset=yes spectrumset="${SRC_SPEC_INNER_TEMP}" \
-        expression="${INNER_CORE_FILTER_EXPR}" \
-        energycolumn=PI spectralbinsize=5 \
-        withspecranges=yes specchannelmin=0 specchannelmax=20479 \
-        writedss=yes
-
-    echo "  Generating ARF for FULL spectrum (temp)..."
-    arfgen spectrumset="${SRC_SPEC_FULL_TEMP}" arfset="${ARF_FILE_FULL_TEMP}" \
-        withrmfset=yes rmfset="${RMF_FILE}" \
-        badpixlocation="${CLEAN_EVT_FILE}" detmaptype=psf
-
-    echo "  Generating ARF for INNER CORE spectrum (temp)..."
-    arfgen spectrumset="${SRC_SPEC_INNER_TEMP}" arfset="${ARF_FILE_INNER_TEMP}" \
-        withrmfset=yes rmfset="${RMF_FILE}" \
-        badpixlocation="${CLEAN_EVT_FILE}" detmaptype=psf
-
-    echo "  Subtracting ARFs to create final ARF: ${ARF_FILE}"
-    addarf "${ARF_FILE_FULL_TEMP} ${ARF_FILE_INNER_TEMP}" "1.0 -1.0" "${ARF_FILE}" clobber=yes
-    echo "--- ARF subtraction complete ---"
-else
-    echo "--- Generating ARF via standard method (no pile-up) ---"
-    arfgen spectrumset="${SRC_SPEC}" arfset="${ARF_FILE}" \
-        withrmfset=yes rmfset="${RMF_FILE}" \
-        badpixlocation="${CLEAN_EVT_FILE}" detmaptype=psf
-    echo "--- Standard ARF generation complete ---"
-fi
+generate_arf "${SRC_SPEC}" "${ARF_FILE}" "${RMF_FILE}" "${SPECTRAL_BASE_FILTER_EXPR}"
 
 # --- 9. Group the Source Spectrum ---
 echo "Grouping the final spectrum: ${GRP_SPEC_FILE}"
@@ -307,7 +186,6 @@ specgroup spectrumset="${SRC_SPEC}" \
 # --- 9b. Plot Lightcurves (EXPANDED SECTION) ---
 echo "--- Plotting final lightcurves ---"
 
-# Define filenames
 LC_SRC_RAW_PS="pn_source_lc_raw.ps"
 LC_SRC_RAW_PNG="pn_source_lc_raw.png"
 LC_BKG_RAW_PS="pn_bkg_lc_raw.ps"
@@ -338,19 +216,10 @@ convert -density 300 "${LC_CORR_PS}[0]" "${LC_CORR_PNG}"
 
 echo "All plots created in: ${LC_DIR}"
 echo "Returning to project root directory..."
-cd "${PROC_DIR}" || { echo "Failed to cd back to ${PROC_DIR}"; exit 1; }
+cd "${PROJECT_ROOT}" || { echo "Failed to cd back to ${PROJECT_ROOT}"; exit 1; }
 # --- End Plotting Section ---
 
-# --- 10. Clean up temporary files ---
-echo "Cleaning up temporary files..."
-if [ "${IS_PILED_UP}" == "yes" ]; then
-    rm -f "${SRC_SPEC_FULL_TEMP}" "${SRC_SPEC_INNER_TEMP}" \
-          "${ARF_FILE_FULL_TEMP}" "${ARF_FILE_INNER_TEMP}"
-fi
-# Keep raw LCs for inspection
-# rm -f "${SRC_LC_RAW_FILE}" "${BKG_LC_RAW_FILE}"
-
-# --- 11. Completion ---
+# --- 10. Completion ---
 echo "--------------------------------------------------"
 echo "Spectral and Lightcurve extraction complete for ObsID ${OBSID}."
 echo ""
