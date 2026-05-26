@@ -1,0 +1,39 @@
+{
+  "statistics": {
+    "cstat": 61484.84,
+    "chisq": 46511.81,
+    "wstat": 35667.26,
+    "dof": 590.0,
+    "nfree": null
+  },
+  "parameters": [
+    {
+      "sect": 1,
+      "comp": 1,
+      "name": "hot_15",
+      "value": 1.0,
+      "err_low": null,
+      "err_high": null,
+      "status": "frozen"
+    },
+    {
+      "sect": 1,
+      "comp": 2,
+      "name": "xabs_nh",
+      "value": 9.86077e-07,
+      "err_low": null,
+      "err_high": null,
+      "status": "thawn"
+    },
+    {
+      "sect": 1,
+      "comp": 4,
+      "name": "pow_norm",
+      "value": 793.4676,
+      "err_low": null,
+      "err_high": null,
+      "status": "thawn"
+    }
+  ],
+  "line_count": 12
+}

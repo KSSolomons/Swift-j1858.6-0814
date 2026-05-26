@@ -1,6 +1,6 @@
 #!/bin/bash
 # SCRIPT: 07_extract_energy_bands_lc.sh
-# DESCRIPTION: Extract energy-resolved pn light curves for the soft (0.5-2.0 keV) and hard (2.0-10.0 keV) bands.
+# DESCRIPTION: Extract energy-resolved pn light curves for the soft (0.5-2.0 keV), hard (2.0-10.0 keV), and full (0.5-10.0 keV) bands.
 
 # --- Source shared setup (env checks, SAS, paths, instrument config) ---
 source "$(dirname "$0")/sas_common.sh"
@@ -8,7 +8,7 @@ source "$(dirname "$0")/sas_common.sh"
 # --- USER CONFIGURATION - EDIT THIS SECTION ---
 
 # Time binning for the output light curves (seconds).
-LC_BIN_SIZE="100"
+LC_BIN_SIZE="50"
 
 # --- END OF CONFIGURATION ---
 
@@ -30,6 +30,7 @@ fi
 mkdir -p "${LC_DIR}"
 
 FILTER_FULL="${SRC_RAWX_FILTER_STD}"
+FILTER_EXCISED="${SRC_RAWX_FILTER_STD} && ${SRC_EXCISION_FILTER}"
 
 extract_band_lc() {
     local band_name=$1
@@ -69,11 +70,11 @@ extract_band_lc() {
         applyabsolutecorrections=yes
 }
 
-band_names=(soft hard)
-band_pi_min=(500 2000)
-band_pi_max=(2000 10000)
-region_suffixes=(full)
-region_filters=("${FILTER_FULL}")
+band_names=(soft hard full_band)
+band_pi_min=(500 2000 500)
+band_pi_max=(2000 10000 10000)
+region_suffixes=(full excised)
+region_filters=("${FILTER_FULL}" "${FILTER_EXCISED}")
 
 for region_index in "${!region_suffixes[@]}"; do
     suffix="${region_suffixes[region_index]}"

@@ -21,11 +21,15 @@ from typing import Iterable
 
 
 _STAT_PATTERNS = {
-    "cstat": re.compile(r"(?i)\bcstat\b\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
-    "chisq": re.compile(r"(?i)\bchi(?:-?squared|2)\b\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
-    "wstat": re.compile(r"(?i)\bwstat\b\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
-    "dof": re.compile(r"(?i)\bdof\b\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
-    "nfree": re.compile(r"(?i)\b(?:n\s*free(?:\s*parameters)?|free\s*parameters)\b\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
+    "fit_method": re.compile(r"(?i)fit\s*method\s*[:=]\s*(.*)"),
+    "fit_statistic": re.compile(r"(?i)fit\s*statistic\s*(?!\s*used)\s*[:=]\s*(.*)"),
+    "fit_statistic_used": re.compile(r"(?i)fit\s*statistic\s*used\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
+    "cstatistic": re.compile(r"(?i)(?:c-statistic|cstat)\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
+    "expected_cstat": re.compile(r"(?i)expected\s*c-stat(?:istic)?\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)(?:\s*\+/-\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?))?"),
+    "chi2_value": re.compile(r"(?i)(?:chi-squared(?:\s*value)?|chi2|chisq)\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
+    "wstat": re.compile(r"(?i)(?:w-statistic|wstat)\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
+    "dof": re.compile(r"(?i)(?:degrees\s*of\s*freedom|dof)\s*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
+    "nfree": re.compile(r"(?i)(?:free\s*parameters|n\s*free|nfree)[^\n:=]*[:=]\s*([+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"),
 }
 
 
@@ -49,45 +53,83 @@ def _safe_float(text: str | None) -> float | None:
         return None
 
 
-def _search_stats(text: str) -> dict[str, float | None]:
-    out: dict[str, float | None] = {}
+def _search_stats(text: str) -> dict[str, float | str | None]:
+    out: dict[str, float | str | None] = {}
     for key, pattern in _STAT_PATTERNS.items():
-        match = pattern.search(text)
-        out[key] = _safe_float(match.group(1)) if match else None
+        matches = list(pattern.finditer(text))
+        if not matches:
+            out[key] = None
+        else:
+            match = matches[-1]  # Use the last occurrence
+            if key == "expected_cstat":
+                val = match.group(1)
+                unc = match.group(2) if match.lastindex and match.lastindex >= 2 else None
+                out[key] = f"{val} +/- {unc}" if unc else val
+            elif key in ("fit_method", "fit_statistic"):
+                out[key] = match.group(1)
+            else:
+                out[key] = _safe_float(match.group(1)) if match.group(1) is not None else None
+
+    # Aliases for compatibility
+    out["cstat"] = out["cstatistic"]
+    out["chisq"] = out["chi2_value"]
     return out
 
 
 def _parse_param_lines(lines: Iterable[str]) -> list[ParsedParameter]:
-    rows: list[ParsedParameter] = []
+    params_dict: dict[tuple[int, int, str], ParsedParameter] = {}
     for raw in lines:
         line = raw.strip()
         if not line:
             continue
 
-        # Common report-table style rows: sect comp name value err_low err_high status
+        # par show free style rows: sect comp mod acro parameter_with_unit value status minimum maximum
+        # or other table rows with values
         match = re.match(
-            r"^(?P<sect>\d+)\s+(?P<comp>\d+)\s+(?P<name>[A-Za-z][\w-]*)\s+"
+            r"^\s*(?P<sect>\d+)\s+(?P<comp>\d+)\s+(?P<mod>[A-Za-z][\w-]*)\s+(?P<name>[A-Za-z0-9_]+)\s+"
+            r"(?P<desc>.*?)\s+"
+            r"(?P<value>[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)\s+"
+            r"(?P<status>thawn|frozen|coupled|tied)\s+"
+            r"(?P<min>[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)\s+"
+            r"(?P<max>[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)$", line, )
+        if match:
+            p = ParsedParameter(
+                sect=int(match.group("sect")),
+                comp=int(match.group("comp")),
+                name=f"{match.group('mod')}_{match.group('name')}",
+                value=_safe_float(match.group("value")),
+                status=match.group("status"),
+            )
+            key = (p.sect, p.comp, p.name)
+            if key in params_dict:
+                del params_dict[key]
+            params_dict[key] = p
+            continue
+
+        # Fallback for simpler format: sect comp name value err_low err_high
+        # status
+        match_simple = re.match(
+            r"^\s*(?P<sect>\d+)\s+(?P<comp>\d+)\s+(?P<name>[A-Za-z][\w-]*)\s+"
             r"(?P<value>[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)"
             r"(?:\s+(?P<err_low>[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?))?"
             r"(?:\s+(?P<err_high>[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?))?"
-            r"(?:\s+(?P<status>[A-Za-z][\w-]*))?$",
-            line,
-        )
-        if not match:
-            continue
-
-        rows.append(
-            ParsedParameter(
-                sect=int(match.group("sect")),
-                comp=int(match.group("comp")),
-                name=match.group("name"),
-                value=_safe_float(match.group("value")),
-                err_low=_safe_float(match.group("err_low")),
-                err_high=_safe_float(match.group("err_high")),
-                status=match.group("status"),
+            r"(?:\s+(?P<status>[A-Za-z][\w-]*))?$", line, )
+        if match_simple:
+            p = ParsedParameter(
+                sect=int(match_simple.group("sect")),
+                comp=int(match_simple.group("comp")),
+                name=match_simple.group("name"),
+                value=_safe_float(match_simple.group("value")),
+                err_low=_safe_float(match_simple.group("err_low")),
+                err_high=_safe_float(match_simple.group("err_high")),
+                status=match_simple.group("status"),
             )
-        )
-    return rows
+            key = (p.sect, p.comp, p.name)
+            if key in params_dict:
+                del params_dict[key]
+            params_dict[key] = p
+
+    return list(params_dict.values())
 
 
 def parse_spex_log_text(text: str) -> dict:
@@ -102,7 +144,10 @@ def parse_spex_log_text(text: str) -> dict:
 
 
 def parse_spex_log(path: Path | str) -> dict:
-    return parse_spex_log_text(Path(path).read_text(encoding="utf-8", errors="replace"))
+    return parse_spex_log_text(
+        Path(path).read_text(
+            encoding="utf-8",
+            errors="replace"))
 
 
 def write_summary_csv(path: Path | str, parsed: dict) -> Path:
@@ -123,3 +168,42 @@ def write_summary_json(path: Path | str, parsed: dict) -> Path:
     return out_path
 
 
+def write_summary_txt(path: Path | str, parsed: dict) -> Path:
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["SPEX Fit Summary", "================", ""]
+
+    stats = parsed.get("statistics", {})
+    # Output in CLI block style if possible
+    lines.append("Statistics:")
+    lines.append("-----------")
+    cli_keys = [
+        ("fit_method", "Fit method"),
+        ("fit_statistic", "Fit statistic"),
+        ("fit_statistic_used", "Fit statistic used"),
+        ("cstatistic", "C-statistic"),
+        ("expected_cstat", "Expected C-stat"),
+        ("chi2_value", "Chi-squared value"),
+        ("dof", "Degrees of freedom"),
+        ("wstat", "W-statistic"),
+        ("nfree", "N free parameters"),
+    ]
+    for k, label in cli_keys:
+        v = stats.get(k)
+        if v is not None:
+            lines.append(f"  {label:<20}: {v}")
+    lines.append("")
+
+    lines.append("Parameters:")
+    lines.append("-----------")
+    params = parsed.get("parameters", [])
+    if params:
+        # Header
+        lines.append(f"{'Sect':<6} {'Comp':<6} {'Name':<20} {'Value':<15} {'Status':<10}")
+        lines.append("-" * 60)
+        for p in params:
+            val_str = f"{p.get('value', 0.0):.4e}" if p.get('value') is not None else "N/A"
+            lines.append(f"{p.get('sect', ''):<6} {p.get('comp', ''):<6} {p.get('name', ''):<20} {val_str:<15} {p.get('status', '')}")
+
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path

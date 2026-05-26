@@ -261,22 +261,42 @@ def _safe_overwrite_guard(path: Path, overwrite: bool) -> None:
 def _build_pn_scan_grid(energy_min_keV: float, energy_max_keV: float, d_lambda_angstrom: float) -> list[tuple[float, float]]:
     energy = float(energy_min_keV)
     grid: list[tuple[float, float]] = []
-    while energy < float(energy_max_keV):
+    
+    # Calculate the equivalent logarithmic step based on the requested 
+    # d_lambda at the lowest energy (where lambda is highest)
+    lambda_max = KEV_ANGSTROM / energy_min_keV
+    d_log_e = float(d_lambda_angstrom) / lambda_max
+    
+    while energy <= float(energy_max_keV):
         lam = KEV_ANGSTROM / energy
         grid.append((energy, lam))
-        lam_next = lam - float(d_lambda_angstrom)
-        if lam_next <= 0:
-            break
-        energy = KEV_ANGSTROM / lam_next
+        
+        # Step forward by a constant logarithmic fraction
+        energy *= np.exp(d_log_e)
+        
     return grid
 
 
 def _build_rgs_scan_grid(lambda_min_ang: float, lambda_max_ang: float, d_lambda_angstrom: float) -> list[tuple[float, float]]:
-    cur = float(lambda_min_ang)
+    # Convert wavelength limits to energy bounds
+    energy_min_keV = KEV_ANGSTROM / float(lambda_max_ang)
+    energy_max_keV = KEV_ANGSTROM / float(lambda_min_ang)
+    
+    energy = float(energy_min_keV)
     out: list[tuple[float, float]] = []
-    while cur <= float(lambda_max_ang):
-        out.append((KEV_ANGSTROM / cur, cur))
-        cur += float(d_lambda_angstrom)
+    
+    # Calculate the equivalent logarithmic step based on the requested 
+    # d_lambda at the lowest energy (where lambda is highest)
+    lambda_max = float(lambda_max_ang)
+    d_log_e = float(d_lambda_angstrom) / lambda_max
+    
+    while energy <= float(energy_max_keV):
+        lam = KEV_ANGSTROM / energy
+        out.append((energy, lam))
+        
+        # Step forward by a constant logarithmic fraction
+        energy *= np.exp(d_log_e)
+        
     return out
 
 

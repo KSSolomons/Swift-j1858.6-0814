@@ -36,6 +36,12 @@ source "$(dirname "$0")/sas_common.sh"
 SRC_RAWX_FILTER="${SRC_RAWX_FILTER_STD}"
 # BKG_RAWX_FILTER is inherited from sas_common.sh
 
+# --- TIME FILTERING ---
+# Set to "yes" to apply the filter below
+USE_TIME_FILTER="no"
+# Example: Only include the persistent region (from 05_extract_time_spectra.sh)
+# EXCLUDE_TIME_FILTER="(TIME IN [701642768.492053:701658528.492053])"
+
 # --- epatplot Energy Range (in eV) ---
 # Default: 0.5-10 keV. Adjust to focus on a specific band.
 # Examples: soft band (500-2000), hard band (2000-10000)
@@ -69,6 +75,11 @@ BKG_EVT_TEMP="${PN_DIR}/pn_bkg_temp.evt"
 
 # Base filter expression
 BASE_FILTER_EXPR="(FLAG==0)&&(PI in [500:15000])&&(PATTERN<=4)"
+
+if [ "${USE_TIME_FILTER}" == "yes" ] && [ -n "${EXCLUDE_TIME_FILTER}" ]; then
+    echo "Applying time filter: ${EXCLUDE_TIME_FILTER}"
+    BASE_FILTER_EXPR="${BASE_FILTER_EXPR} && ${EXCLUDE_TIME_FILTER}"
+fi
 
 if [ ! -f "${CLEAN_EVT_FILE}" ]; then
     echo "ERROR: Could not find ${CLEAN_EVT_FILE}"
