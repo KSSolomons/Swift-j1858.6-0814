@@ -24,7 +24,7 @@ class SpexCliWorkflowTests(unittest.TestCase):
     def test_workflow_script_renders_expected_sections(self):
         workflow = _load_module("spex_cli_workflow_test", SCRIPT_DIR / "workflow.py")
         cfg = workflow.WorkflowConfig(obsid="0865600201", instrument="pn")
-        paths, script = workflow.build_workflow(REPO_ROOT, cfg)
+        paths, script, _ = workflow.build_workflow(REPO_ROOT, cfg)
         self.assertIn("fit stat cstat", script)
         self.assertIn("com hot", script)
         self.assertIn("par show free", script)
@@ -48,10 +48,9 @@ class SpexCliWorkflowTests(unittest.TestCase):
                 obsid="0865600201", instrument="pn",
                 best_fit_params_file=tmp_path,
             )
-            paths, script = workflow.build_workflow(REPO_ROOT, cfg)
+            paths, script, _ = workflow.build_workflow(REPO_ROOT, cfg)
 
             # Should contain the best-fit values
-            self.assertIn("best-fit values file", script)
             self.assertIn("par 1 2 nh v 0.023", script)
             self.assertIn("par 1 2 xil v -1.07", script)
             self.assertIn("par 1 2 nh stat thawn", script)
@@ -71,11 +70,11 @@ class SpexCliWorkflowTests(unittest.TestCase):
     def test_workflow_without_best_fit_params_uses_fallback_defaults(self):
         workflow = _load_module("spex_cli_workflow_nob", SCRIPT_DIR / "workflow.py")
         cfg = workflow.WorkflowConfig(obsid="0865600201", instrument="pn", continuum_model="pow")
-        paths, script = workflow.build_workflow(REPO_ROOT, cfg)
+        paths, script, _ = workflow.build_workflow(REPO_ROOT, cfg)
 
         # Should contain fallback default values
-        self.assertIn("par 1 1 t v 0.0008", script)
-        self.assertIn("par 1 2 nh v 0.003", script)
+        self.assertIn("par 1 1 t v 8.0000e-04", script)
+        self.assertIn("par 1 2 nh v 3.0000e-03", script)
         self.assertIn("par 1 3 t v 0.5", script)
         self.assertIn("par 1 4 gamm v 1.5", script)
 
@@ -120,7 +119,7 @@ class SpexCliWorkflowTests(unittest.TestCase):
             blind_search_run=True,
             blind_search_refit_baseline=True
         )
-        paths, script = workflow.build_workflow(REPO_ROOT, cfg)
+        paths, script, _ = workflow.build_workflow(REPO_ROOT, cfg)
         self.assertIn("Refit baseline model to ensure best-fit baseline before freezing", script)
 
 

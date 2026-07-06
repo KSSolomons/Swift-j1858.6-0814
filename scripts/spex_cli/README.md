@@ -11,9 +11,11 @@ This directory contains the command-line-only SPEX workflow.
 - Optionally runs that batch script through your local SPEX executable
 - Parses the resulting log into a compact JSON/CSV summary
 
-## Examples
+## Usage & Examples
 
-### PN (Single Sector)
+### Basic Fitting
+
+**PN (Single Sector)**
 ```bash
 python scripts/spex_cli/run_workflow.py \
   --obsid 0865600201 \
@@ -22,21 +24,19 @@ python scripts/spex_cli/run_workflow.py \
   --run
 ```
 
-### RGS (Multi-Sector Cross-Calibration)
+**RGS (Multi-Sector Cross-Calibration)**
 ```bash
 python scripts/spex_cli/run_workflow.py \
   --obsid 0865600201 \
   --instrument rgs \
   --interval Full \
-  --multi-sector \
   --spex-threads 1 \
   --run
 ```
-
-For convenience, use the top-level `run_fit.sh` helper script.
+*Note: By default, RGS fitting operates in **multi-sector** mode with **Region 1 (Order 1) only**, which is the recommended setup for cross-calibration.*
 
 ### Interactive Setup (No Fitting)
-If you want to manually fit your data in an interactive SPEX session, you can use the `--setup-only` flag. This will generate a batch script that loads the data, defines the model, and sets the starting parameters, but skips the actual fitting process:
+If you want to manually fit your data in an interactive SPEX session, use the `--setup-only` flag. This generates a batch script that loads the data, defines the model, and sets the starting parameters, but skips the fitting process:
 
 ```bash
 python scripts/spex_cli/run_workflow.py \
@@ -45,56 +45,115 @@ python scripts/spex_cli/run_workflow.py \
   --interval Full \
   --setup-only
 ```
-
 The script will output exact instructions for how to open SPEX and run the generated file.
 
-## Multi-sector cross-calibration
+### Advanced Fit Options
 
-To untie normalizations between RGS1 and RGS2, use the `--multi-sector` flag. 
-This requires that you have converted the data using the `--multi-sector` flag
-in `port_to_spex.py` (see `scripts/spex_port/README.md`).
+**Include xabs Absorption**
+To run a single fit with the `xabs` absorption component included:
+```bash
+python scripts/spex_cli/run_workflow.py \
+    --obsid 0865600201 --instrument pn --interval Full \
+    --xabs --run
+```
+
+**Model Comparison (BIC Test for xabs)**
+To compare models with and without `xabs` absorption and calculate the Bayesian Information Criterion (BIC):
+```bash
+python scripts/spex_cli/run_workflow.py \
+    --obsid 0865600201 --instrument pn --interval Full \
+    --test-xabs --run
+```
+
+**Start from Best-Fit Parameters**
+To skip the staged fitting steps (which usually freeze continuum parameters initially) and start directly from a known set of best-fit parameters:
+```bash
+python scripts/spex_cli/run_workflow.py \
+    --obsid 0865600201 --instrument pn --interval Full \
+    --best-fit-params /path/to/best_fit_params.json \
+    --run
+```
+
+**Custom Energy Range and Iteration Cap**
+To fit using a specific energy range (e.g. 0.6–8.0 keV) and cap the maximum number of iterations:
+```bash
+python scripts/spex_cli/run_workflow.py \
+    --obsid 0865600201 --instrument pn --interval Full \
+    --pn-energy-min 0.6 --pn-energy-max 8.0 \
+    --fit-iter-cap 500 --run
+```
+
+**Blind Search (Line Scan)**
+To run a blind search (line scan) over a given energy/wavelength range instead of a static fit:
+```bash
+python scripts/spex_cli/run_workflow.py \
+    --obsid 0865600201 --instrument pn --interval Full \
+    --run --blind-search-run --binning min_counts \
+    --pn-energy-min 2.0 --pn-energy-max 10.0 \
+    --blind-search-dlam 0.01
+```
+
+## Configuration Details
+
+### Multi-sector cross-calibration
+
+To untie normalizations between RGS1 and RGS2, the workflow defaults to `--multi-sector`. 
+This requires that you have converted the data using the default `--multi-sector` flag in `port_to_spex.py` (see `scripts/spex_port/README.md`).
 
 When enabled:
 - Loads RGS1 and RGS2 as separate instruments (Sectors 1 and 2).
 - Couples physical shape parameters (T, N_H, etc.) between sectors.
 - Leaves additive component normalizations free to fit the cross-calibration.
 
-This creates:
+This loads:
 - `products/<obsid>/rgs/spex/rgs1_<interval>_spex.{spo,res}` (Sector 1)
 - `products/<obsid>/rgs/spex/rgs2_<interval>_spex.{spo,res}` (Sector 2)
 
-Then enable `MULTI_SECTOR="true"` in `run_fit.sh` (or pass `--multi-sector` to
-`run_workflow.py`) to load them into separate sectors.
-
-### Order filtering
-
-Use `--orders` to control which RGS orders are included (default: `1,2`). 
-This is useful to exclude the noisier 2nd order data:
+If you prefer to disable cross-calibration and fit both instruments in a single sector, pass the `--no-multi-sector` flag:
 
 ```bash
-# Order 1 only (single-sector)
-python scripts/spex_port/port_to_spex.py rgs \
-    --obsid 0865600201 --interval Full --orders 1 --overwrite
-
-# Order 1 only (multi-sector cross-calibration)
-python scripts/spex_port/port_to_spex.py rgs \
-    --obsid 0865600201 --interval Full --multi-sector --orders 1 --overwrite
+python scripts/spex_cli/run_workflow.py \
+    --obsid 0865600201 --instrument rgs --interval Full \
+    --no-multi-sector --run
 ```
 
-### Region Selection (RGS)
+### Order and Region Selection (RGS)
 
-When running the fit workflow (`run_workflow.py`), use the `--rgs-regions` flag to control which regions to fit (default: `1:4`). 
+By default, the porting script exports only Order 1 data, and the fit workflow script defaults to `--rgs-regions 1` to fit only Region 1 (Order 1).
 
-If your `.spo` file contains multiple regions (e.g. multiple orders), but you only want to fit the first region, you can specify it like this:
+If you ported both orders (e.g. `--orders 1,2` during porting) and want to fit all regions, you can specify `--rgs-regions 1:4` during `run_workflow.py`:
 
 ```bash
 python scripts/spex_cli/run_workflow.py \
     --obsid 0865600201 \
     --instrument rgs \
     --interval Full \
-    --rgs-regions 1 \
+    --rgs-regions 1:4 \
     --run
 ```
+
+### Binning options
+
+By default, the workflow applies SPEX-native optimal binning (`obin`) to the ungrouped data. You can configure this behavior using the `--binning` and `--min-counts` CLI options:
+
+- **Optimal Binning** (Default): Uses the `obin` command in SPEX.
+  ```bash
+  python scripts/spex_cli/run_workflow.py \
+      --obsid 0865600201 --instrument pn --interval Full \
+      --binning optimal --run
+  ```
+- **Minimum Counts (Variable Binning)**: Uses the `vbin` command to group bins based on a target signal-to-noise ratio derived from a counts threshold (defaults to 20):
+  ```bash
+  python scripts/spex_cli/run_workflow.py \
+      --obsid 0865600201 --instrument pn --interval Full \
+      --binning min_counts --min-counts 30 --run
+  ```
+- **No Binning**: Fits ungrouped channel-level data (no grouping command emitted):
+  ```bash
+  python scripts/spex_cli/run_workflow.py \
+      --obsid 0865600201 --instrument pn --interval Full \
+      --binning none --run
+  ```
 
 ## Important: Threading (SIGSEGV)
 

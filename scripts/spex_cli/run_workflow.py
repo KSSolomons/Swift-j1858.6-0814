@@ -25,11 +25,11 @@ where k is the number of free parameters and N is the number of data points.
 A Delta BIC > 10 indicates strong evidence for the more complex model;
 a negative Delta BIC indicates the simpler (NULL) model is preferred.
 
-To run without the xabs absorption component:
+To run with the xabs absorption component:
 
     python scripts/spex_cli/run_workflow.py \
         --obsid 0865600201 --instrument pn --interval Full \
-        --no-xabs --run
+        --xabs --run
 
 To use a specific energy range and iteration cap:
 
@@ -138,14 +138,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--obsid", required=True)
     p.add_argument("--instrument", required=True, choices=["pn", "rgs"])
     p.add_argument("--interval", default="Full")
-    p.add_argument("--thermal-model", default="dbb")
+    p.add_argument("--thermal-model", default="bb")
     p.add_argument(
         "--continuum-model",
-        default="comt",
+        default="pow",
         choices=[
             "pow",
             "comt"])
-    p.add_argument("--fit-iter-cap", type=int, default=100)
+    p.add_argument("--fit-iter-cap", type=int, default=None)
     p.add_argument("--no-fit-iter-cap", action="store_true",
                    help="Do not emit fit iter caps in the SPEX batch file")
     p.add_argument("--spex-threads", type=int, default=4,
@@ -177,7 +177,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.set_defaults(blind_search_make_plot=True)
     p.add_argument(
         "--best-fit-params",
-        default=str(Path(__file__).resolve().parent / "best_fit_params.json"),
+        default=None,
         help="Path to a JSON file with best-fit starting values")
     p.add_argument(
         "--binning",
@@ -194,20 +194,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Minimum counts threshold for 'min_counts' binning strategy (default: 20)")
     p.add_argument("--pn-energy-min", type=float, default=0.6,
                    help="Lower energy limit for PN fitting in keV (default: 0.6)")
-    p.add_argument("--pn-energy-max", type=float, default=10.0,
-                   help="Upper energy limit for PN fitting in keV (default: 10.0)")
+    p.add_argument("--pn-energy-max", type=float, default=8.0,
+                   help="Upper energy limit for PN fitting in keV (default: 8.0)")
     p.add_argument("--rgs-lam-min", type=float, default=5.0,
                    help="Lower wavelength limit for RGS fitting in Angstroms (default: 5.0)")
     p.add_argument("--rgs-lam-max", type=float, default=38.0,
                    help="Upper wavelength limit for RGS fitting in Angstroms (default: 38.0)")
     p.add_argument(
         "--rgs-regions",
-        default="1:4",
-        help="SPEX regions to fit when using RGS (default: 1:4, options: 1, 1:2, etc.)")
+        default="1",
+        help="SPEX regions to fit when using RGS (default: 1, options: 1, 1:2, etc.)")
     p.add_argument(
-        "--no-xabs",
+        "--xabs",
         action="store_true",
-        help="Do not include the xabs absorption component")
+        help="Include the xabs absorption component")
     p.add_argument(
         "--test-xabs",
         action="store_true",
@@ -215,8 +215,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--multi-sector",
         action="store_true",
+        default=True,
         help="Treat RGS1 and RGS2 as separate SPEX sectors for cross-calibration "
-             "(requires trafo to have placed them in separate sectors)")
+             "(default: True)")
+    p.add_argument(
+        "--no-multi-sector",
+        action="store_false",
+        dest="multi_sector",
+        help="Disable multi-sector mode and treat RGS as a single sector")
     p.add_argument(
         "--setup-only",
         action="store_true",
@@ -260,8 +266,8 @@ def main(argv: list[str] | None = None) -> int:
         rgs_lam_min=args.rgs_lam_min,
         rgs_lam_max=args.rgs_lam_max,
         rgs_regions=args.rgs_regions,
-        multi_sector=args.multi_sector,
-        include_xabs=not args.no_xabs,
+        multi_sector=args.multi_sector if args.instrument == "rgs" else False,
+        include_xabs=args.xabs,
         quit_at_end=not args.setup_only,
     )
 

@@ -1,0 +1,29 @@
+{
+    "_comment": "Frozen best-fit parameters from the Persistent interval to test on the Shallow interval. Using hot*xabs*(bb+pow) values.",
+    "hot": {
+        "nh": 3.1449628E-4,
+        "t": 1.0E-6,
+        "nh_status": "frozen",
+        "t_status": "frozen"
+    },
+    "xabs": {
+        "nh": 0.003,
+        "xil": 2.0,
+        "fcov": 1.0,
+        "nh_status": "frozen",
+        "xil_status": "frozen",
+        "fcov_status": "frozen"
+    },
+    "bb": {
+        "t": 0.6363493,
+        "norm": 9.1095513E-9,
+        "t_status": "frozen",
+        "norm_status": "frozen"
+    },
+    "pow": {
+        "gamm": 1.490113,
+        "norm": 0.9464370,
+        "gamm_status": "frozen",
+        "norm_status": "frozen"
+    }
+}

@@ -134,47 +134,7 @@ def resolve_rgs_datasets(products_root: Path, obsid: str, interval: str,
     return out
 
 
-def _import_pyspextools():
-    try:
-        import pyspextools.io as spio
-        import pyspextools.io.ogip as ogip
-        return spio, ogip
-    except ImportError:
-        raise RuntimeError("pyspextools not found. Please activate your SPEX conda environment.")
 
-
-def convert_to_spex(
-    instrument: str, 
-    datasets: list[Union[PnDataset, RgsDataset]], 
-    out_base: Path, 
-    overwrite: bool
-) -> tuple[Path, Path]:
-    """Generic converter for PN (list of 1) or RGS (list of N) datasets."""
-    spio, ogip = _import_pyspextools()
-    ds = spio.Dataset()
-
-    print(f"Converting {len(datasets)} dataset(s) for {instrument.upper()}...")
-    for d in datasets:
-        oregion = ogip.OGIPRegion()
-        # Read the OGIP data. grouping=False ensures we get channel-level data.
-        kwargs = {
-            "phafile": str(d.spec),
-            "rmffile": str(d.rmf),
-            "bkgfile": str(d.bkg),
-            "grouping": False
-        }
-        if hasattr(d, "arf"):
-            kwargs["arffile"] = str(d.arf)
-        
-        oregion.read_region(**kwargs)
-        oregion.ogip_to_spex()
-        
-        print(f"  Mapping {d.spec.name} -> Region {d.region}, Sector {d.sector}")
-        ds.append_region(oregion, d.region, d.sector)
-
-    spo_path, res_path = out_base.with_suffix(".spo"), out_base.with_suffix(".res")
-    ds.write_all_regions(str(spo_path), str(res_path), overwrite=overwrite)
-    return spo_path, res_path
 
 
 def convert_with_trafo(
@@ -218,7 +178,10 @@ def convert_with_trafo(
     idx = child.expect(["Enter the number of sectors you want to create:", "Enter your preferred option.*:"])
     if idx == 0:
         child.sendline("1")
-        child.expect("Enter your preferred option.*:")
+        idx2 = child.expect(["Enter the sector and region number:", "Enter your preferred option.*:"])
+        if idx2 == 0:
+            child.sendline("1 1")
+            child.expect("Enter your preferred option.*:")
     child.sendline("1")
     
     child.expect(r"calculate the response derivatives.*:")
@@ -226,7 +189,26 @@ def convert_with_trafo(
     
     for i, d in enumerate(datasets):
         print(f"  Mapping {d.spec.name} via trafo...")
-        child.expect("Enter filename spectrum to be read:")
+        
+        idx = child.expect([
+            "Enter the sector and region number:", 
+            "Enter filename spectrum to be read:",
+            r"Enter your preferred option \(1,2,3\):"
+        ])
+        if idx == 2:
+            child.sendline("1")
+            idx = child.expect(["Enter the sector and region number:", "Enter filename spectrum to be read:"])
+            
+        if idx == 0:
+            child.sendline(f"{d.sector} {d.region}")
+            idx2 = child.expect(["Enter filename spectrum to be read:", r"Enter your preferred option \(1,2,3\):"])
+            if idx2 == 1:
+                child.sendline("1")
+                idx3 = child.expect(["Enter filename spectrum to be read:", r"calculate the response derivatives.*:"])
+                if idx3 == 1:
+                    child.sendline("n")
+                    child.expect("Enter filename spectrum to be read:")
+            
         child.sendline(d.spec.name)
         
         idx = child.expect(["Enter filename background spectrum to be read:", r"Read nevertheless a background file\?.*:"])
@@ -245,11 +227,35 @@ def convert_with_trafo(
             child.expect("Enter filename response matrix to be read:")
         child.sendline(d.rmf.name)
         
-        idx = child.expect(["Enter filename effective area to be read:", r"Read nevertheless an effective area file\?.*:"])
+        idx = child.expect([
+            r"Enter shift to response array.*:",
+            "Enter filename effective area to be read:",
+            "Enter filename arf-file to be read:",
+            r"Read nevertheless an effective area file\?.*:"
+        ])
+        if idx == 0:
+            child.sendline("1")
+            idx = child.expect([
+                "Enter filename effective area to be read:",
+                "Enter filename arf-file to be read:",
+                r"Read nevertheless an effective area file\?.*:"
+            ])
+            # idx is now 0, 1, or 2
+            if idx == 2:
+                idx = 1 # Map back to 1 for the logic below
+            else:
+                idx = 0 # Map 0 and 1 to 0
+        else:
+            # idx was 1, 2, or 3
+            if idx == 3:
+                idx = 1
+            else:
+                idx = 0
+            
         if idx == 1:
             if hasattr(d, "arf") and d.arf:
                 child.sendline("y")
-                child.expect("Enter filename effective area to be read:")
+                child.expect(["Enter filename effective area to be read:", "Enter filename arf-file to be read:"])
                 child.sendline(d.arf.name)
             else:
                 child.sendline("n")
@@ -262,7 +268,20 @@ def convert_with_trafo(
         child.expect("Enter any shift in bins.*:")
         child.sendline("0")
 
-    child.expect(r"Enter filename spectrum to be saved.*:")
+    idx = child.expect([
+        r"Enter your preferred option \(1,2,3\):",
+        r"Enter filename spectrum to be saved.*:"
+    ])
+    if idx == 0:
+        child.sendline("1")
+        idx3 = child.expect([
+            r"Enter filename spectrum to be saved.*:",
+            r"calculate the response derivatives.*:"
+        ])
+        if idx3 == 1:
+            child.sendline("n")
+            child.expect(r"Enter filename spectrum to be saved.*:")
+        
     child.sendline(str(out_base_abs))
     
     child.expect(r"Enter filename response to be saved.*:")
@@ -278,17 +297,25 @@ def convert_with_trafo(
     return spo_path, res_path
 
 
+def _default_pn_out_base(products_root: Path, obsid: str, interval: str) -> Path:
+    return products_root / obsid / "pn" / "spex" / f"pn_{interval}_spex"
+
+
+def _default_rgs_out_base(products_root: Path, obsid: str, interval: str) -> Path:
+    return products_root / obsid / "rgs" / "spex" / f"rgs_{interval}_spex"
+
+
 def _run_conversion(args: argparse.Namespace) -> int:
     products_root = Path(args.products_root).expanduser().resolve()
     
     # Resolve input datasets
     if args.instrument == "pn":
         datasets = [resolve_pn_dataset(products_root, args.obsid, args.interval)]
-        default_out = products_root / args.obsid / "pn" / "spex" / f"pn_{args.interval}_spex"
+        default_out = _default_pn_out_base(products_root, args.obsid, args.interval)
     else:
         orders = tuple(int(o) for o in getattr(args, 'orders', '1,2').split(','))
         datasets = resolve_rgs_datasets(products_root, args.obsid, args.interval, orders=orders)
-        default_out = products_root / args.obsid / "rgs" / "spex" / f"rgs_{args.interval}_spex"
+        default_out = _default_rgs_out_base(products_root, args.obsid, args.interval)
 
     out_base = Path(args.out_base).expanduser().resolve() if args.out_base else default_out
 
@@ -327,17 +354,11 @@ def _run_conversion(args: argparse.Namespace) -> int:
                     region=i, sector=inst_id
                 ))
             inst_out = out_base.parent / f"rgs{inst_id}_{args.interval}_spex"
-            if args.backend == 'trafo':
-                spo, res = convert_with_trafo(args.instrument, renumbered, inst_out, args.overwrite)
-            else:
-                spo, res = convert_to_spex(args.instrument, renumbered, inst_out, args.overwrite)
+            spo, res = convert_with_trafo(args.instrument, renumbered, inst_out, args.overwrite)
             outputs[f"rgs{inst_id}"] = {"spo": str(spo), "res": str(res)}
         manifest["outputs"] = outputs
     else:
-        if args.backend == 'trafo':
-            spo, res = convert_with_trafo(args.instrument, datasets, out_base, args.overwrite)
-        else:
-            spo, res = convert_to_spex(args.instrument, datasets, out_base, args.overwrite)
+        spo, res = convert_with_trafo(args.instrument, datasets, out_base, args.overwrite)
         manifest["outputs"] = {"spo": str(spo), "res": str(res)}
 
     manifest_path = out_base.with_suffix(".manifest.json")
@@ -364,13 +385,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         sp.add_argument("--out-base", help="Output base path (without extension)")
         sp.add_argument("--dry-run", action="store_true", help="Print paths without converting")
         sp.add_argument("--overwrite", action="store_true", help="Overwrite existing .spo/.res files")
-        sp.add_argument("--backend", choices=["pyspextools", "trafo"], default="pyspextools", 
-                        help="Conversion engine to use (default: pyspextools)")
+        sp.add_argument("--backend", choices=["trafo"], default="trafo", 
+                        help="Conversion engine to use (default: trafo)")
         if instr == "rgs":
-            sp.add_argument("--multi-sector", action="store_true",
-                            help="Place RGS1 in Sector 1 and RGS2 in Sector 2 (for cross-calibration)")
-            sp.add_argument("--orders", default="1,2",
-                            help="Comma-separated RGS orders to include (default: 1,2)")
+            sp.add_argument("--multi-sector", action="store_true", default=True,
+                            help="Place RGS1 in Sector 1 and RGS2 in Sector 2 (for cross-calibration, default: True)")
+            sp.add_argument("--no-multi-sector", action="store_false", dest="multi_sector",
+                            help="Disable multi-sector conversion (merge RGS1 and RGS2 into a single sector)")
+            sp.add_argument("--orders", default="1",
+                            help="Comma-separated RGS orders to include (default: 1)")
 
     args = p.parse_args(argv)
     try:

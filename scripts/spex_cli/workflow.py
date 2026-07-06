@@ -27,11 +27,11 @@ class WorkflowConfig:
     instrument: str
     interval: str = "Full"
 
-    thermal_model: str = "dbb"
+    thermal_model: str = "bb"
     # Can be 'pow' or 'comt' (nthcomp equivalent)
-    continuum_model: str = "comt"
-    include_xabs: bool = True      # Whether to include the xabs absorption component
-    fit_iter_cap: int | None = 100  # Maximum iterations for SPEX fit command
+    continuum_model: str = "pow"
+    include_xabs: bool = False     # Whether to include the xabs absorption component
+    fit_iter_cap: int | None = None  # Maximum iterations for SPEX fit command
     spex_threads: int | None = 4
     overwrite_conversion: bool = False
     blind_search_run: bool = False
@@ -45,7 +45,7 @@ class WorkflowConfig:
     binning_strategy: str = "optimal"
     min_counts_threshold: int = 20
     pn_energy_min: float = 0.6  # keV
-    pn_energy_max: float = 10.0  # keV
+    pn_energy_max: float = 8.0  # keV
     rgs_lam_min: float = 5.0    # Angstroms
     rgs_lam_max: float = 38.0   # Angstroms
     rgs_regions: str = "1:4"
@@ -276,16 +276,18 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
     else:
         raise ValueError("instrument must be 'pn' or 'rgs'")
 
-    idx_hot = 1
-    idx_xabs = 2 if cfg.include_xabs else None
-    idx_dbb = 3 if cfg.include_xabs else 2
-    idx_cont = 4 if cfg.include_xabs else 3
+    idx_hot1 = 1
+    idx_hot2 = 2
+    idx_xabs = 3 if cfg.include_xabs else None
+    idx_bb = 4 if cfg.include_xabs else 3
+    idx_cont = 5 if cfg.include_xabs else 4
 
     lines += [
         #"var calc qc",
         #"ions nmax all 5",
         # "fit print 0",
         "",
+        "com hot",
         "com hot",
     ]
     if cfg.include_xabs:
@@ -294,8 +296,8 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
     lines += [
         f"com {cfg.thermal_model}",
         f"com {cfg.continuum_model}",
-        f"com rel {idx_dbb} {idx_hot}{',' + str(idx_xabs) if idx_xabs else ''}",
-        f"com rel {idx_cont} {idx_hot}{',' + str(idx_xabs) if idx_xabs else ''}",
+        f"com rel {idx_bb} {str(idx_xabs) + ',' if idx_xabs else ''}{idx_hot2},{idx_hot1}",
+        f"com rel {idx_cont} {str(idx_xabs) + ',' if idx_xabs else ''}{idx_hot2},{idx_hot1}",
     ]
 
     # Multi-sector: duplicate the model structure to Sector 2
@@ -309,16 +311,24 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
     params = params or {}
     hot = params.get("hot", {})
     xabs = params.get("xabs", {})
-    dbb = params.get("dbb", {})
+    bb = params.get("bb", {})
     cont = params.get(cfg.continuum_model, {})
 
     lines += [
         "",
         "# Set initial model parameters",
-        f"par 1 {idx_hot} t v {_fmt_val(hot.get('t', 0.0008))}",
-        f"par 1 {idx_hot} t stat {hot.get('t_status', 'frozen')}",
-        f"par 1 {idx_hot} nh v {_fmt_val(hot.get('nh', 0.002))}",
-        f"par 1 {idx_hot} nh stat {hot.get('nh_status', 'frozen')}",
+        "# Hot 1 (ISM): nh frozen to 2e-3",
+        f"par 1 {idx_hot1} t v {_fmt_val(hot.get('t', 1E-6))}",
+        f"par 1 {idx_hot1} t stat {hot.get('t_status', 'frozen')}",
+        f"par 1 {idx_hot1} nh v 2.0e-3",
+        f"par 1 {idx_hot1} nh stat frozen",
+        "",
+        "# Hot 2 (Intrinsic): nh thawn",
+        f"par 1 {idx_hot2} t v {_fmt_val(hot.get('t', 1E-6))}",
+        f"par 1 {idx_hot2} t stat {hot.get('t_status', 'frozen')}",
+        f"par 1 {idx_hot2} nh v {_fmt_val(hot.get('nh', 1E-3))}",
+        f"par 1 {idx_hot2} nh stat thawn",
+        f"par 1 {idx_hot2} nh range 0.0:1.0e10",
         "",
     ]
     if cfg.include_xabs:
@@ -336,10 +346,10 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
         ]
 
     lines += [
-        f"par 1 {idx_dbb} t v {_fmt_val(dbb.get('t', 0.5))}",
-        f"par 1 {idx_dbb} t stat {dbb.get('t_status', 'thawn')}",
-        f"par 1 {idx_dbb} norm v {_fmt_val(dbb.get('norm', 1.0e-6))}",
-        f"par 1 {idx_dbb} norm stat {dbb.get('norm_status', 'thawn')}",
+        f"par 1 {idx_bb} t v {_fmt_val(bb.get('t', 0.5))}",
+        f"par 1 {idx_bb} t stat {bb.get('t_status', 'thawn')}",
+        f"par 1 {idx_bb} norm v {_fmt_val(bb.get('norm', 1.0e-6))}",
+        f"par 1 {idx_bb} norm stat {bb.get('norm_status', 'thawn')}",
         "",
     ]
     if cfg.continuum_model == "pow":
@@ -351,7 +361,7 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
         ]
     elif cfg.continuum_model == "comt":
         lines += [
-            f"par 1 {idx_cont} t0 couple 1 {idx_dbb} t",
+            f"par 1 {idx_cont} t0 couple 1 {idx_bb} t",
             f"par 1 {idx_cont} t1 v {_fmt_val(cont.get('t1', 50.0))}",
             f"par 1 {idx_cont} t1 stat {cont.get('t1_status', 'frozen')}",
             "# Force tau to 2.0 and freeze it (user request)",
@@ -371,8 +381,10 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
             "# " + "="*60,
             "",
             "# Couple absorption / ISM shape",
-            f"par 2 {idx_hot} t couple 1 {idx_hot} t",
-            f"par 2 {idx_hot} nh couple 1 {idx_hot} nh",
+            f"par 2 {idx_hot1} t couple 1 {idx_hot1} t",
+            f"par 2 {idx_hot1} nh couple 1 {idx_hot1} nh",
+            f"par 2 {idx_hot2} t couple 1 {idx_hot2} t",
+            f"par 2 {idx_hot2} nh couple 1 {idx_hot2} nh",
         ]
         if cfg.include_xabs:
             lines += [
@@ -385,7 +397,7 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
         lines += [
             "",
             "# Couple thermal shape (temperature only — norm stays free)",
-            f"par 2 {idx_dbb} t couple 1 {idx_dbb} t",
+            f"par 2 {idx_bb} t couple 1 {idx_bb} t",
         ]
         if cfg.continuum_model == "pow":
             lines += [
@@ -404,29 +416,29 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
         lines += [
             "",
             "# Couple normalizations for physical consistency",
-            f"par 2 {idx_dbb} norm couple 1 {idx_dbb} norm",
+            f"par 2 {idx_bb} norm couple 1 {idx_bb} norm",
             f"par 2 {idx_cont} norm couple 1 {idx_cont} norm",
             "",
             "# Untie instrument normalization for cross-calibration (leaving instrument 1 frozen at 1.0)",
             "par -2 1 norm stat thawn",
         ]
 
+    lines += [
+        "",
+        "fit stat cstat",
+    ]
+
+    if cfg.fit_iter_cap is not None:
+        lines.append(f"fit iter {int(cfg.fit_iter_cap)}")
+
     if fit_model:
-        lines += [
-            "",
-            "fit stat cstat",
-        ]
-
-        if cfg.fit_iter_cap is not None:
-            lines.append(f"fit iter {int(cfg.fit_iter_cap)}")
-
         lines += [
             "fit",
             "",
         ]
     else:
         lines.append("")
-        lines.append("# Skipping fit commands")
+        lines.append("# Skipping fit execution")
         if cfg.quit_at_end:
             lines.append("fit iter 0")
 
@@ -487,17 +499,16 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
         lines += [
                   "",
                   "# --- Layout ---",
-                  "plot cap id f",
                   "plot view def f",
                   "plot view x 0.08:0.92",
                   "plot view y 0.1:0.3",
+                  "plot ry -10:10",
                   "plot frame 1",
                   "plot view def f",
-                  "plot ry 0.005:1.0",
+                  "plot ry 0.005:5.0",
                   "plot view x 0.08:0.92",
-                  "plot view y 0.3:1.0",
+                  "plot view y 0.3:0.92",
                   "plot box numlab bot f",
-                  "plot cap x f",
                   "plot",
                   "plot close 1",
                   ]
@@ -525,13 +536,15 @@ def render_fit_script(cfg: WorkflowConfig, paths: WorkflowPaths, fit_model: bool
         ]
         idx_gaus = idx_cont + 1
         lines += [
-            f"com rel {idx_gaus} {idx_hot}{',' + str(idx_xabs) if idx_xabs else ''}",
+            f"com rel {idx_gaus} {idx_hot1},{idx_hot2}{',' + str(idx_xabs) if idx_xabs else ''}",
             "",
             "# Freeze all continuum and absorption parameters",
-            f"par 1 {idx_hot} nh stat frozen",
-            f"par 1 {idx_hot} t stat frozen",
-            f"par 1 {idx_dbb} t stat frozen",
-            f"par 1 {idx_dbb} norm stat frozen",
+            f"par 1 {idx_hot1} nh stat frozen",
+            f"par 1 {idx_hot1} t stat frozen",
+            f"par 1 {idx_hot2} nh stat frozen",
+            f"par 1 {idx_hot2} t stat frozen",
+            f"par 1 {idx_bb} t stat frozen",
+            f"par 1 {idx_bb} norm stat frozen",
         ]
         
         if cfg.continuum_model == "pow":
@@ -662,17 +675,16 @@ def render_plot_script(cfg: WorkflowConfig, paths: WorkflowPaths, plot_device: s
     lines += [
         "",
         "# --- Layout ---",
-        "plot cap id f",
         "plot view def f",
         "plot view x 0.08:0.92",
         "plot view y 0.1:0.3",
+        "plot ry -10:10",
         "plot frame 1",
         "plot view def f",
-        "plot ry 0.005:1.0",
+        "plot ry 0.005:5.0",
         "plot view x 0.08:0.92",
-        "plot view y 0.3:1.0",
+        "plot view y 0.3:0.92",
         "plot box numlab bot f",
-        "plot cap x f",
         "plot",
     ]
     if plot_device == "cps":

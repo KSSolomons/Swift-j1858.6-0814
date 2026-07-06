@@ -8,7 +8,7 @@ source "$(dirname "$0")/sas_common.sh"
 # --- USER CONFIGURATION - EDIT THIS SECTION ---
 
 # Time binning for the output light curves (seconds).
-LC_BIN_SIZE="50"
+LC_BIN_SIZE="100"
 
 # --- END OF CONFIGURATION ---
 

@@ -1,31 +1,21 @@
 {
-    "_comment": "Best-fit starting values for the hot*xabs*(dbb+pow) model. These are loaded by workflow.py to seed SPEX parameters so staged fitting is not needed.",
+    "_comment": "Best-fit starting values for the hot*(bb+pow) model based on the Persistent interval. These are loaded by workflow.py to seed SPEX parameters.",
     "hot": {
-        "nh": 0.002,
-        "t": 0.0008,
-        "nh_status": "frozen",
+        "nh": 3.1449628E-4,
+        "t": 1.0E-6,
+        "nh_status": "thawn",
         "t_status": "frozen"
     },
-    "xabs": {
-        "nh": 0.003,
-        "xil": 2.0,
-        "fcov": 0.7,
-        "nh_status": "thawn",
-        "xil_status": "thawn",
-        "fcov_status": "thawn"
+    "bb": {
+        "t": 0.6363493,
+        "norm": 9.1095513E-9,
+        "t_status": "freeze",
+        "norm_status": "freeze"
     },
-    "dbb": {
-        "t": 0.429,
-        "norm": 8.1e-1,
-        "t_status": "thawn",
-        "norm_status": "thawn"
-    },
-    "comt": {
-        "t1": 5.67,
-        "tau": 2.0,
-        "norm": 0.001,
-        "t1_status": "thawn",
-        "tau_status": "frozen",
-        "norm_status": "thawn"
+    "pow": {
+        "gamm": 1.490113,
+        "norm": 0.9464370,
+        "gamm_status": "freeze",
+        "norm_status": "freeze"
     }
 }

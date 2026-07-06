@@ -29,46 +29,45 @@ python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full 
 python scripts/spex_port/port_to_spex.py rgs --obsid 0865600201 --interval Full --overwrite
 ```
 
+By default, RGS porting compiles **Order 1 only** and enables **multi-sector** mode to support cross-calibration between RGS1 and RGS2.
+
 ### Multi-sector (cross-calibration)
 
-To fit RGS1 and RGS2 with independent normalizations, use `--multi-sector` to
-produce separate `.spo`/`.res` files per instrument. Each file is loaded as a
-separate SPEX sector via two `data` commands in the fit workflow.
+To fit RGS1 and RGS2 with independent normalizations, the script defaults to `--multi-sector`. This produces separate `.spo`/`.res` files for RGS1 and RGS2, which are loaded as separate SPEX sectors via two `data` commands in the fit workflow.
 
 ```bash
-# RGS1 + RGS2, both orders
+# RGS1 + RGS2, order 1 only (default)
 python scripts/spex_port/port_to_spex.py rgs \
-    --obsid 0865600201 --interval Full --multi-sector --overwrite
+    --obsid 0865600201 --interval Full --overwrite
 
-# RGS1 + RGS2, order 1 only (recommended — excludes noisy 2nd-order data)
+# RGS1 + RGS2, both orders (if desired)
 python scripts/spex_port/port_to_spex.py rgs \
-    --obsid 0865600201 --interval Full --multi-sector --orders 1 --overwrite
+    --obsid 0865600201 --interval Full --orders 1,2 --overwrite
 ```
 
 This creates:
-- `products/<obsid>/rgs/spex/rgs1_<interval>_spex.{spo,res}` — RGS1
-- `products/<obsid>/rgs/spex/rgs2_<interval>_spex.{spo,res}` — RGS2
+- `products/<obsid>/rgs/spex/rgs1_<interval>_spex.{spo,res}` — RGS1 (Sector 1)
+- `products/<obsid>/rgs/spex/rgs2_<interval>_spex.{spo,res}` — RGS2 (Sector 2)
 
-Then enable `MULTI_SECTOR="true"` in `run_fit.sh` (or pass `--multi-sector` to
-`run_workflow.py`) to load them into separate sectors.
+By default, `run_workflow.py` has `--multi-sector` enabled as well, so it will automatically load these files into separate sectors.
 
 ### Order filtering
 
-Use `--orders` to control which RGS orders are included (default: `1,2`):
+Use `--orders` to control which RGS orders are included (default: `1`). This is configured to exclude the noisier 2nd order data by default:
 
 ```bash
-# Order 1 only (single-sector, no cross-calibration)
+# Single-sector, order 1 only
 python scripts/spex_port/port_to_spex.py rgs \
-    --obsid 0865600201 --interval Full --orders 1 --overwrite
+    --obsid 0865600201 --interval Full --no-multi-sector --overwrite
 ```
 
-### Using the Trafo backend
+### Conversion Backend
 
-By default, the script uses `pyspextools`. If you experience issues or prefer to use the classic `trafo` utility, pass `--backend trafo`. This uses `pexpect` to drive the interactive `trafo` utility automatically. Note that `trafo` must be available in your system `$PATH`.
+The script uses the classic `trafo` utility by default (using `pexpect` to drive the interactive `trafo` inputs automatically). Note that `trafo` must be available in your system `$PATH`.
 
 ```bash
 python scripts/spex_port/port_to_spex.py rgs \
-    --obsid 0865600201 --interval Full --multi-sector --backend trafo --overwrite
+    --obsid 0865600201 --interval Full --overwrite
 ```
 
 ## Output locations
@@ -76,7 +75,7 @@ python scripts/spex_port/port_to_spex.py rgs \
 Defaults if `--out-base` is not provided:
 
 - PN: `products/<obsid>/pn/spex/pn_<interval>_spex.{spo,res}`
-- RGS: `products/<obsid>/rgs/spex/rgs_<interval>_spex.{spo,res}`
+- RGS (no multi-sector): `products/<obsid>/rgs/spex/rgs_<interval>_spex.{spo,res}`
 - RGS (multi-sector): `products/<obsid>/rgs/spex/rgs{1,2}_<interval>_spex.{spo,res}`
 
 A sidecar manifest is always written as:

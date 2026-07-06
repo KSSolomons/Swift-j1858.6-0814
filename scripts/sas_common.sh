@@ -55,7 +55,7 @@ echo "SAS_ODF: $(basename "${SAS_ODF}")"
 # <1.5% destruction in the PSF core (RAWX 35-40). No excision needed.
 IS_PILED_UP="no"
 SRC_RAWX_FILTER_STD="RAWX in [27:47]"
-BKG_RAWX_FILTER="RAWX in [1:3]"
+BKG_RAWX_FILTER="RAWX in [3:8]"
 SRC_EXCISION_FILTER="!(RAWX in [36:38])"
 
 # --- 5. Utility Functions ---
